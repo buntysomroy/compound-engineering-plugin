@@ -21,6 +21,7 @@ Rejection criteria:
 - **unjustified — no articulated warrant** (sub-agent failed to provide `direct:`, `external:`, or `reasoned:` justification, or the stated warrant does not actually support the claimed move)
 - **below ambition floor** (fails the meeting-test: would not warrant team discussion — except when Phase 0.5 detected tactical focus signals, in which case this criterion is waived)
 - **subject-replacement** (abandons or replaces the subject of ideation rather than operating on it — e.g., "pivot to an unrelated domain," "become a different organization")
+- **scope overrun** (expands beyond the asked scope rather than ideating within it — e.g., proposes changes to the whole product when the user asked about one flow, stage, or section). Allowed only when the warrant explicitly justifies the expansion; default is reject or downgrade.
 
 Score survivors using a consistent rubric weighing: groundedness in stated context, **warrant strength** (`direct:` > `external:` > `reasoned:`; none excluded, but direct-evidence ideas score higher all else equal), expected value, novelty, pragmatism, leverage on future work, implementation burden, and overlap with stronger ideas.
 

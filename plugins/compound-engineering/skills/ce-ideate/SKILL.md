@@ -2,6 +2,7 @@
 name: ce-ideate
 description: "Generate and critically evaluate grounded ideas about a topic. Use when asking what to improve, requesting idea generation, exploring surprising directions, or wanting the AI to proactively suggest strong options before brainstorming one in depth. Triggers on phrases like 'what should I improve', 'give me ideas', 'ideate on X', 'surprise me', 'what would you change', or any request for AI-generated suggestions rather than refining the user's own idea."
 argument-hint: "[feature, focus area, or constraint]"
+
 ---
 
 # Generate Improvement Ideas
@@ -50,16 +51,19 @@ If no argument is provided, proceed with open-ended ideation.
 Look in `docs/ideation/` for ideation documents created within the last 30 days.
 
 Treat a prior ideation doc as relevant when:
+
 - the topic matches the requested focus
 - the path or subsystem overlaps the requested focus
 - the request is open-ended and there is an obvious recent open ideation doc
 - the issue-grounded status matches: do not offer to resume a non-issue ideation when the current argument indicates issue-tracker intent, or vice versa — treat these as distinct topics
 
 If a relevant doc exists, ask whether to:
+
 1. continue from it
 2. start fresh
 
 If continuing:
+
 - read the document
 - summarize what has already been explored
 - preserve previous idea statuses
@@ -179,10 +183,12 @@ Infer two things from the argument and any intake so far:
 - **Volume override** — any hint that changes candidate or survivor counts
 
 Default volume:
+
 - each ideation sub-agent generates about 6-8 ideas (yielding ~36-48 raw ideas across 6 frames in the default path, or ~24-32 across 4 frames in issue-tracker mode; roughly 25-30 survivors after dedupe in the 6-frame path and fewer in the 4-frame path)
 - keep the top 5-7 survivors
 
 Honor clear overrides such as:
+
 - `top 3`
 - `100 ideas`
 - `go deep`
@@ -235,13 +241,15 @@ Run grounding agents in parallel in the **foreground** (do not background — re
 1. **Quick context scan** — dispatch a general-purpose sub-agent using the platform's cheapest capable model (e.g., `model: "haiku"` in Claude Code) with this prompt:
 
    > Read the project's AGENTS.md (or CLAUDE.md only as compatibility fallback, then README.md if neither exists), then discover the top-level directory layout using the native file-search/glob tool (e.g., `Glob` with pattern `*` or `*/*` in Claude Code). Also read `STRATEGY.md` if it exists — it captures the product's target problem, approach, persona, metrics, and tracks. Return a concise summary (under 30 lines) covering:
+   >
    > - project shape (language, framework, top-level directory layout)
    > - notable patterns or conventions
    > - obvious pain points or gaps
    > - likely leverage points for improvement
    > - product strategy summary, if `STRATEGY.md` was present — include the approach and active tracks verbatim so ideation can weight toward strategy-aligned directions
+   > - **other markdown at root** — list any other root-level `*.md` files by name (e.g., `NOTES.md`, `TODO.md`) under a heading `Additional documents present`. Do **not** read their contents into the summary. They will be surfaced to the user before Phase 2 dispatch so they can name any that should inform ideation; unnamed root-level documents are treated as incidental, not project context.
    >
-   > Keep the scan shallow — read only top-level documentation, `STRATEGY.md` if present, and directory structure. Do not analyze GitHub issues, templates, or contribution guidelines. Do not do deep code search.
+   > Keep the scan shallow — read only the project-defining files (AGENTS.md/CLAUDE.md/README.md/STRATEGY.md) and directory structure. Do not analyze GitHub issues, templates, or contribution guidelines. Do not do deep code search.
    >
    > Focus hint: {focus_hint}
 
@@ -278,6 +286,7 @@ When dispatching `ce-web-researcher`, pass: the focus hint, a brief planning con
 Consolidate all dispatched results into a short grounding summary using these sections (omit any section that produced nothing):
 
 - **Codebase context** *(repo mode)* OR **Topic context** *(elsewhere mode)* — project/topic shape, notable patterns or stated constraints, pain points, leverage points
+- **Additional documents present** *(repo mode, when codebase scan listed any)* — names of other root-level markdown files the scan found but did not read. Surface this list verbatim with a one-line invitation: "Pass any of these in if I should include them as context before generation; otherwise I'll proceed without." Proceed without blocking — the user can interrupt to name a file, or stay silent and let unnamed docs remain out of grounding.
 - **Past learnings** — relevant institutional knowledge from `docs/solutions/`
 - **Issue intelligence** *(when present, repo mode only)* — theme summaries with titles, descriptions, issue counts, and trend directions
 - **External context** *(when web research ran)* — prior art, adjacent solutions, market signals, cross-domain analogies. Note "(reused from earlier dispatch)" when V15 reuse fired
@@ -294,6 +303,8 @@ Generate the full candidate list before critiquing any idea.
 Dispatch parallel ideation sub-agents on the inherited model (do not tier down -- creative ideation needs the orchestrator's reasoning level). Omit the `mode` parameter so the user's configured permission settings apply. Dispatch count is mode-conditional: **4 sub-agents only when issue-tracker intent was detected in Phase 0.2 AND the issue intelligence agent returned usable themes** (see override below — cluster-derived frames capped at 4); **6 sub-agents otherwise**, including the insufficient-issue-signal fallback from Phase 1 where intent triggered but themes were not returned. Each targets ~6-8 ideas (yielding ~36-48 raw ideas across 6 frames or ~24-32 across 4 frames, roughly 25-30 survivors after dedupe in the 6-frame path and fewer in the 4-frame path). Adjust per-agent targets when volume overrides apply (e.g., "100 ideas" raises it, "top 3" may lower the survivor count instead).
 
 Give each sub-agent: the grounding summary, the focus hint, the per-agent volume target, and an instruction to generate raw candidates only (not critique). Each agent's first few ideas tend to be obvious -- push past them. Ground every idea in the Phase 1 grounding summary.
+
+**Constraint vs background.** In the dispatch prompt, mark the user's prompt, focus hint, and any named references as *constraints* — ideas that violate them are out regardless of warrant. Mark the rest of the grounding summary (codebase context, learnings, external context, additional documents the user opted in) as *background* — informative, not directive. Background is for grounding warrants and informing direction; it must not pull ideation toward whatever was loudest in the corpus when the user named a different focus. This is the primary defense against grounding noise (an unrelated `FEEDBACK.md`, a tangentially-cited prior-art result) shaping survivors against user intent.
 
 Assign each sub-agent a different ideation frame as a **starting bias, not a constraint**. Prompt each to begin from its assigned perspective but follow any promising thread -- cross-cutting ideas that span multiple frames are valuable.
 
@@ -329,6 +340,7 @@ Warrant is required, not optional. If a sub-agent cannot articulate warrant of a
 - Bias toward the warrant type your frame naturally produces — pain/inversion/leverage tend toward `direct:`; analogy and constraint-flipping tend toward `reasoned:`; assumption-breaking is mixed — but don't exclude other warrant types.
 - Apply the meeting-test as a default floor: would this idea warrant team discussion? If not, it's below the floor and does not surface. The floor is relaxed only when Phase 0.5 detected tactical focus signals.
 - Stay within the subject's identity. Product expansions, new surfaces, new markets, retirements, and architectural pivots are fair game when warrant supports them. Subject-replacement moves (abandoning the project, pivoting to unrelated domains, becoming a different organization) are out regardless of warrant.
+- **Honor the asked scope.** When the focus hint names a part of the subject (a flow, a stage, a section, a feature within a larger product — e.g., "account settings", "onboarding flow", "pricing page copy", "gameplay rules"), ideate at full ambition *within that scope*. Expanding the surface to the whole subject — proposing fundamental changes to the broader product when the user named one slice — is a scope mismatch even when no subject-replacement occurred. Big-picture thinking still applies; it just operates inside the bounded surface the user named, not by widening the surface.
 
 **Surprise-me mode addendum.** When Phase 0.2 routed to surprise-me, include this additional instruction in each sub-agent's dispatch prompt:
 

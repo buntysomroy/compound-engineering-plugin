@@ -32,6 +32,7 @@ For current-branch mode, resolve `<base>` in priority order: caller-supplied (`b
 
 ```bash
 git fetch --no-tags <base-remote> <base>
+git fetch --no-tags <base-remote> <head>   # PR mode only: <head> is headRefOid and may not be local
 git log  --oneline "<base-remote>/<base>..<head>"
 git diff           "<base-remote>/<base>...<head>"
 ```

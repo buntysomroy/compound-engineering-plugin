@@ -277,8 +277,9 @@ describe("ce-code-review contract", () => {
     // Stage 5b exists between Stage 5 and Stage 6
     expect(content).toContain("### Stage 5b: Validation pass")
 
-    // Stage 5b runs for default and agent when budget allows
+    // Stage 5b runs whenever at least one finding survives; same in default and agent
     expect(content).toContain("Same rule for default and `mode:agent`")
+    expect(content).toMatch(/do \*\*not\*\* skip the stage/i)
 
     // Per-finding bounded dispatch (not batched)
     expect(content).toMatch(/per.finding bounded dispatch/i)
@@ -286,9 +287,11 @@ describe("ce-code-review contract", () => {
     expect(content).toMatch(/same bounded scheduler from Stage 4/i)
     expect(content).toMatch(/active-subagent limit/i)
 
-    // Budget cap of 15
+    // Budget cap of 15 — validate highest-severity first; P0/P1 are never dropped for budget
     expect(content).toMatch(/exceeds 15 findings/i)
-    expect(content).toMatch(/highest-severity 15.*Drop the remainder/i)
+    expect(content).toMatch(/highest-severity 15/i)
+    expect(content).toMatch(/Never drop a P0 or P1 from validation/i)
+    expect(content).toMatch(/raise the cap to (cover|include) all of them/i)
 
     // Validator template exists and is read-only
     expect(validatorTemplate).toContain("independent validator")

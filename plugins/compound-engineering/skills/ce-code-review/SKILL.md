@@ -55,6 +55,8 @@ Same pipeline for default and `mode:agent`:
 
 `mode:agent` changes **serialization only**, not reviewer selection, merge logic, or scope rules.
 
+The `mode:agent` JSON is the **deterministic, machine-readable contract** for programmatic and cross-harness callers (Codex, Gemini, etc.) — route automation through it, not through the markdown. The default markdown is the **human-readable view**; it will render differently across terminals and harnesses, so keep it ASCII-safe (pipe tables, `->` not middot `·`, no box-drawing) so it degrades gracefully where rendering differs.
+
 ## Quick Review Short-Circuit
 
 If `$ARGUMENTS` indicates the user wants a quick, fast, or light code review — and **`mode:agent` is not active** — do not dispatch the multi-agent flow.
@@ -467,12 +469,12 @@ Demotion is intentionally narrow. The conservative scope (testing/maintainabilit
 
 Independent verification gate. Spawn one validator sub-agent per surviving finding using `references/validator-template.md`. Findings the validator rejects are dropped; confirmed findings flow through unchanged.
 
-**When this stage runs:** After Stage 5 when the surviving finding count is between 1 and 15 inclusive. Skip when zero findings or when more than 15 survivors (record over-budget in Coverage). Same rule for default and `mode:agent`.
+**When this stage runs:** After Stage 5 whenever at least one finding survives. Skip only when zero findings survive. When more than 15 survive, do **not** skip the stage — validate the highest-severity 15 per step 2 and record the over-budget remainder in Coverage. **P0 and P1 findings are always validated** (never dropped for budget); if P0/P1 alone exceed 15, raise the cap to cover all of them rather than ship an unvalidated critical or high finding. Same rule for default and `mode:agent`.
 
 **Steps:**
 
 1. **Select findings to validate.** All survivors of Stage 5.
-2. **Apply dispatch budget cap.** If the selected set exceeds 15 findings, validate the highest-severity 15 (P0 first, then P1, then P2, then P3, breaking ties by anchor descending). Drop the remainder and record the over-budget count for the Coverage section. The blunt drop is intentional; a review producing 15+ surviving findings is already in territory where a second wave would not change the user's triage approach.
+2. **Apply dispatch budget cap.** If the selected set exceeds 15 findings, validate the highest-severity 15 (P0 first, then P1, then P2, then P3, breaking ties by anchor descending), dropping only from the P2/P3 tail. **Never drop a P0 or P1 from validation** — if P0/P1 findings alone exceed 15, raise the cap to include all of them. Record the over-budget count (the dropped P2/P3 tail) for the Coverage section. Dropping the low-severity tail is intentional; the long tail of P2/P3 does not change the user's triage, but an unvalidated critical or high finding does.
 3. **Spawn validators with bounded parallelism.** One sub-agent per finding, dispatched independently using the validator template and the same bounded scheduler from Stage 4. Each validator receives:
    - The finding's title, severity, file, line, suggested_fix, original reviewer name, and confidence anchor
    - `why_it_matters` when available — loaded from the per-agent artifact file at `/tmp/compound-engineering/ce-code-review/{run_id}/{reviewer_name}.json`; omit when the file is absent or the artifact write failed. The validator proceeds without it, using the diff and cited code directly.
@@ -486,11 +488,27 @@ Independent verification gate. Spawn one validator sub-agent per surviving findi
 5. **Use mid-tier model for validators.** Same model class (sonnet) the persona reviewers use. Validators are read-only — same constraints as persona reviewers. They may use non-mutating inspection commands (Read, Grep, Glob, git blame, gh).
 6. **Record metrics for Coverage.** Total dispatched, validated true count, validated false count (with reasons), failures, and over-budget drops.
 
+**Orchestrator direct verification (complement, not a skip).** When a finding's severity hinges on a fact the orchestrator can check cheaply and authoritatively — a pinned dependency's source, a wiring/config fact in this repo, a build tag — verify it directly in addition to (not instead of) the validator subagent; a first-party source read is stronger than a subagent re-read. Use single-purpose native tools (Read/Grep/Glob, one git command at a time), never chained or error-suppressed shell. Fold confirmed facts into synthesis and note them in Coverage. This never replaces the validator wave for P0/P1 — those still get an independent validator per the cap rule above.
+
 **Why per-finding bounded dispatch (not batched):** Independence is the point. A single batched validator looking at all findings together pattern-matches across them and recreates the persona-bias problem. Per-finding dispatch preserves fresh context while the scheduler respects harness limits. Per-file batching is a plausible future optimization for reviews with many findings clustered in few files; not implemented today.
 
 ### Stage 6: Synthesize and present
 
 Assemble the final report. **Default:** pipe-delimited markdown tables for findings (mandatory — see review output template). **`mode:agent`:** skip markdown and emit JSON (see ### JSON output format). Other sections (Actionable Findings, Learnings, Coverage, etc.) use bullets and `---` before the verdict in markdown mode only.
+
+**Findings table shape (default mode — load-bearing, do not improvise).** Render every finding as a row in a pipe-delimited table grouped by severity. Copy this shape; do not invent a layout:
+
+| # | File | Issue | Reviewer | Confidence | Route |
+|---|------|-------|----------|------------|-------|
+| 1 | `path/to/file.go:42` | One concise line — detail lives in `why_it_matters`/JSON | correctness | 100 | `gated_auto -> downstream-resolver` |
+
+Keep the `Issue` cell to a single concise line so rows stay narrow across terminals and non-Claude harnesses; depth belongs in `why_it_matters` (artifact/JSON), not the table. This inline skeleton is the always-loaded fallback so the shape survives a long session even if `references/review-output-template.md` was not reloaded — that template carries the full per-section rules.
+
+**Never produce these shapes (instant fail — if you catch one mid-draft, re-render every finding as the table above before delivering):**
+- Findings as `Field:`-prefixed blocks (`Sev:` / `File:` / `Issue:` / `Route:` lines)
+- Per-finding separators made of horizontal rules or box-drawing characters (`────`, `———`)
+- Findings as a numbered or bulleted list instead of table rows
+- Unicode separators or arrows in the Route cell (middot `·`); use ASCII `->`
 
 1. **Header.** Scope, intent, mode, reviewer team with per-conditional justifications.
 2. **Findings.** Rendered as pipe-delimited tables grouped by severity (`### P0 -- Critical`, `### P1 -- High`, `### P2 -- Moderate`, `### P3 -- Low`). Each finding row shows `#`, file, issue, reviewer(s), confidence, and synthesized route. Omit empty severity levels. Never render findings as freeform text blocks or numbered lists. Finding numbers come from the stable assignment in Stage 5 -- never re-derive them per severity table.
@@ -508,7 +526,7 @@ Assemble the final report. **Default:** pipe-delimited markdown tables for findi
 
 Do not include time estimates.
 
-**Format verification (default only):** Before delivering a markdown report, verify findings use pipe-delimited table rows (`| # | File | Issue | ... |`) not freeform text. Skip this check when `mode:agent` is active — JSON is the deliverable.
+**Format verification (default only — last gate before delivering).** Scan the assembled report for the failure signatures above: if any finding appears as `Field:`-prefixed lines, as a bulleted or numbered list, or separated by `────`/box-drawing/middot `·` characters, STOP and re-render every finding as pipe-delimited table rows (`| # | File | Issue | ... |`) before delivering. Skip this check only when `mode:agent` is active — JSON is the deliverable.
 
 ### JSON output format (`mode:agent` only)
 

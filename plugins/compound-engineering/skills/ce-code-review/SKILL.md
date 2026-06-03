@@ -510,15 +510,15 @@ Assemble the final report. **Default:** pipe-delimited markdown tables for findi
 
 Per-severity tables are **5 columns** — `Route` is not shown here (it appears only in the Actionable Findings table and the JSON). Keep the `Issue` cell to **one short clause** (roughly 12 words or fewer, no second sentence, no because/so/which explanation) — it is the scannable index, not the explanation. The moment a cell wants a comma-plus-clause or a reason, move that depth into the **keyed detail line** (`- **#N** — …`) instead of packing it in — usually for P0/P1; P2/P3 are typically terse-only.
 
-**Never produce these shapes (instant fail — if you catch one mid-draft, re-render before delivering):**
-- A finding's index rendered as `Field:`-prefixed blocks (`Sev:` / `File:` / `Issue:` / `Route:` lines) — depth goes in the keyed detail line, never a field block
-- Per-finding separators made of horizontal rules or box-drawing characters (`────`, `———`)
-- The severity index as a plain bulleted/numbered list **instead of** a table (the keyed `- **#N** —` detail line under a table is a supplement, not a replacement — that is expected)
+**Never produce these shapes (instant fail — applies to *every* tabular section, the Applied table included, not just the severity findings; if you catch one mid-draft, re-render before delivering):**
+- Any row — a finding **or** an Applied entry — rendered as `Field:`-prefixed blocks (`#:` / `Sev:` / `File:` / `Issue:` / `Fix:` / `Route:` lines) — depth goes in the keyed detail line, never a field block
+- Per-row separators made of horizontal rules or box-drawing characters (`────`, `———`)
+- A table replaced by a plain bulleted/numbered list (the keyed `- **#N** —` detail line under a table is a supplement, not a replacement — that is expected)
 - Unicode separators or arrows in cells (middot `·`); use ASCII `->`
-- **Inconsistent treatment across severities** (e.g. P1 as blocks while P2/P3 are tables) — every severity uses the same table + optional detail-line shape
+- **Inconsistent treatment across severities or sections** (e.g. P1 as blocks while P2/P3 are tables, or the Applied table as field-blocks while findings are tables) — every table uses the same pipe-delimited shape
 
 1. **Header.** Scope, intent, mode, reviewer team with per-conditional justifications.
-2. **Applied (default mode only).** When Stage 5c applied fixes, list them first — before the findings tables — in an Applied section (see review output template): `# | File | Fix | Reviewer`, then a one-line validation outcome (e.g. "pin tests 4 -> 6; suite 94 pass, lint clean") and commit status (committed on a clean tree as `fix(review): …` or the repo's nearest convention, or left uncommitted for the user on a dirty one). Flag green-but-unverifiable edits (auth/contract/concurrency) prominently. Omit this section in `mode:agent` and when nothing was applied. Applied findings appear here, not in the severity tables.
+2. **Applied (default mode only).** When Stage 5c applied fixes, list them first — before the findings tables — in an Applied section (see review output template) as a pipe table `| # | File | Fix | Reviewer |` — **never** `Field:`-blocks or `────` separators, same rules as the findings tables — then a one-line validation outcome (e.g. "pin tests 4 -> 6; suite 94 pass, lint clean") and commit status (committed on a clean tree as `fix(review): …` or the repo's nearest convention, or left uncommitted for the user on a dirty one). Flag green-but-unverifiable edits (auth/contract/concurrency) prominently. Omit this section in `mode:agent` and when nothing was applied. Applied findings appear here, not in the severity tables.
 3. **Findings.** Pipe-delimited tables grouped by severity (`### P0 -- Critical`, `### P1 -- High`, `### P2 -- Moderate`, `### P3 -- Low`), using the shape above — the **same** shape for every severity. Omit empty severity levels. Finding numbers come from the stable assignment in Stage 5 -- never re-derive them per severity table.
 4. **Requirements Completeness.** Include only when a plan was found in Stage 2b. For each requirement (R1, R2, etc.) and implementation unit in the plan, report whether corresponding work appears in the diff. Use a simple checklist: met / not addressed / partially addressed. Routing depends on `plan_source`:
    - **`explicit`** (caller-provided or PR body): Flag unaddressed requirements or implementation units as P1 findings with `autofix_class: manual`, `owner: downstream-resolver`. These enter the actionable queue.
@@ -534,7 +534,7 @@ Per-severity tables are **5 columns** — `Route` is not shown here (it appears 
 
 Do not include time estimates.
 
-**Format verification (default only — last gate before delivering).** Before delivering, scan the report against the "Never produce these shapes" list above. If any severity's index hit one of those shapes, STOP and re-render every severity as the same pipe-delimited table before delivering. (The keyed `- **#N** —` detail line under a table is expected — not a failure.) Skip only when `mode:agent` is active.
+**Format verification (default only — last gate before delivering).** Before delivering, scan **every table — the Applied table and each severity findings table** — for the forbidden shapes: `Field:`-prefixed blocks (`#:` / `File:` / `Fix:` / `Issue:`), box-drawing or horizontal-rule separators (`────`), middot `·`, or a list replacing a table. **The Applied table is the most common offender — check it explicitly.** If any table hit one of these, STOP and re-render it as the same pipe-delimited shape before delivering. (The keyed `- **#N** —` detail line under a table is expected — not a failure.) Skip only when `mode:agent` is active.
 
 ### JSON output format (`mode:agent` only)
 

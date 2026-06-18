@@ -26,7 +26,7 @@ Parse `$ARGUMENTS` for optional tokens. Strip each recognized token before inter
 | `mode:headless` | `mode:headless` | **Deprecated alias** for `mode:agent` |
 | `mode:report-only` | `mode:report-only` | **Deprecated — ignored.** Former no-artifacts mode; default behavior is review-only without checkout |
 | `base:<sha-or-ref>` | `base:abc1234` or `base:origin/main` | Diff base on the **current checkout** (explicit; skips auto base detection) |
-| `plan:<path>` | `plan:docs/plans/2026-03-25-001-feat-foo-plan.md` | Plan file for requirements verification (explicit) |
+| `plan:<path>` | `plan:docs/plans/2026-03-25-001-feat-foo-plan.md` | Plan file for requirements verification (explicit). Supports markdown and HTML unified plans. |
 | `depth:full` | `depth:full` | **Force the full reviewer roster** — skip the Stage 3c small-diff lite path so every always-on persona runs regardless of diff size. Use when a deep/thorough review is explicitly requested (the one escalation signal Stage 3c cannot infer from the diff). Does not change conditional selection, merge, or scope. |
 | `depth:auto` | `depth:auto` | **Default** — self-right-size via Stage 3c (lite roster for trivial, low-risk, code-only diffs; full roster otherwise). |
 | `grouping:auto` | `grouping:auto` | **Default** — build thematic triage groups when findings span distinct concerns (Stage 5 step 9b) |
@@ -135,11 +135,38 @@ A full review spawns generic subagents for all 4 always-on personas plus the 2 C
 
 The following paths are compound-engineering pipeline artifacts and must never be flagged for deletion, removal, or gitignore by any reviewer:
 
-- `docs/brainstorms/*` -- requirements documents created by ce-brainstorm
-- `docs/plans/*.md` -- plan files created by ce-plan (decision artifacts; execution progress is derived from git, not stored in plan bodies)
+- `docs/brainstorms/*` -- legacy requirements documents created by older ce-brainstorm versions
+- `docs/plans/*.{md,html}` -- unified plan artifacts created by ce-brainstorm or ce-plan (decision artifacts; execution progress is derived from git, not stored in plan bodies)
 - `docs/solutions/*.md` -- solution documents created during the pipeline
 
 If a reviewer flags any file in these directories for cleanup or removal, discard that finding during synthesis.
+
+## Plan Requirements Completeness
+
+When a plan is provided via `plan:<path>` or discovered from PR/branch context,
+classify readiness before checking completeness:
+
+- Unified artifact: metadata includes `artifact_contract: ce-unified-plan/v1`.
+  - `artifact_readiness: requirements-only` can inform product intent, but it
+    must not trigger implementation-unit completeness findings. Report that the
+    artifact was not implementation-ready if the diff appears to implement it.
+  - `artifact_readiness: implementation-ready` is eligible for full
+    requirements and U-ID completeness checks.
+  - Invalid progress-like readiness values (`active`, `in_progress`,
+    `completed`, `done`) are contract errors.
+- Legacy plan: use the existing completeness checks.
+
+Extract requirements from these shapes, in order:
+
+1. Unified `Product Contract` -> `### Requirements`
+2. Legacy top-level `## Requirements`
+3. Legacy `## Requirements Trace`
+
+For unified implementation-ready plans, also extract U-IDs from
+`## Implementation Units` and compare against PR body/branch context when
+available. Do not require every Product Contract R-ID to map one-to-one to a
+single U-ID; verify that implemented U-IDs cite the relevant R/F/AE/KTD IDs and
+that no claimed U-ID is missing from the plan.
 
 ## How to Run
 

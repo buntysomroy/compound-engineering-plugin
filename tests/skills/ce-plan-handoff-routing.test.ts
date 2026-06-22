@@ -219,5 +219,49 @@ describe("ce-plan post-generation menu routing", () => {
         "Issue Creation tracker detection must point at the project instructions already in the agent's context rather than a file to open.",
       ).toBe(true)
     })
+
+    // Codex review of PR #971 (P1): the prose named the tracker category, but
+    // the visible menu still said "(GitHub or Linear)" and the no-config prompt
+    // offered no path for any other tracker — keeping the closed set exactly
+    // when recovering from missing config. Guard both surfaces.
+    test("menu labels name the tracker category, not a closed GitHub/Linear set", () => {
+      expect(
+        /configured issue tracker \(GitHub or Linear\)/i.test(SKILL_BODY),
+        'ce-plan SKILL.md "Create Issue" menu label must name the category (e.g., GitHub Issues, Linear, Jira), not the closed "(GitHub or Linear)" set.',
+      ).toBe(false)
+      expect(
+        /configured issue tracker \(GitHub or Linear\)/i.test(HANDOFF_BODY),
+        'plan-handoff.md "Create Issue" menu label must name the category, not the closed "(GitHub or Linear)" set.',
+      ).toBe(false)
+    })
+
+    test("no-config prompt offers a path beyond GitHub/Linear", () => {
+      // The blocking-question options in the no-config branch must include an
+      // Other path so a Jira (or any) project isn't locked out of issue creation.
+      expect(
+        /Options:[^\n]*`Other`/.test(ISSUE_CREATION_SECTION),
+        "Issue Creation no-config prompt must offer an `Other` option so non-GitHub/Linear trackers can be selected.",
+      ).toBe(true)
+    })
+
+    // Codex review of PR #971 (P3): the inline SKILL.md routing caches at session
+    // start while the reference loads on demand, so the capability-based Linear
+    // guidance must also live inline — not only in plan-handoff.md.
+    test("inline SKILL.md Create Issue routing is capability-based for Linear", () => {
+      const phaseStart = SKILL_BODY.indexOf("##### 5.3.8")
+      const phaseRegion = SKILL_BODY.slice(phaseStart)
+      const createIssueRouting = phaseRegion.match(
+        /^- \*\*Create Issue\*\*[^\n]+/m,
+      )
+      expect(
+        createIssueRouting,
+        "ce-plan SKILL.md is missing the inline '- **Create Issue** ...' routing bullet.",
+      ).not.toBeNull()
+      const bullet = createIssueRouting![0]
+      expect(
+        /connector|MCP|API|GraphQL/i.test(bullet) && /no guaranteed `linear` CLI|not.*proof|do not treat/i.test(bullet),
+        "ce-plan SKILL.md inline Create Issue routing must carry the capability-based Linear guidance (named access surfaces + 'missing binary is not proof unavailable'), since inline routing is what an agent sees when the reference isn't loaded.",
+      ).toBe(true)
+    })
   })
 })

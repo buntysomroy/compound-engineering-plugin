@@ -136,13 +136,27 @@ function createPiSummaryContextSession(): string {
     },
     {
       type: "message",
-      id: "kept-user",
+      id: "old-bash",
       parentId: "old-user",
-      timestamp: "2026-04-07T09:02:00.000Z",
+      timestamp: "2026-04-07T09:02:30.000Z",
+      message: {
+        role: "bashExecution",
+        command: "bun test old-compacted.test.ts",
+        output: "old compacted failure",
+        exitCode: 1,
+        cancelled: false,
+        timestamp: 1775542950000,
+      },
+    },
+    {
+      type: "message",
+      id: "kept-user",
+      parentId: "old-bash",
+      timestamp: "2026-04-07T09:02:40.000Z",
       message: {
         role: "user",
         content: [{ type: "text", text: "kept_after_compaction_keyword only" }],
-        timestamp: 1775542920000,
+        timestamp: 1775542960000,
       },
     },
     {
@@ -852,6 +866,21 @@ describe("extract-skeleton", () => {
     expect(stdout).not.toContain("abandoned-branch.test.ts")
   })
 
+  test("mirrors Pi compaction context in skeleton extraction", async () => {
+    const { stdout, exitCode } = await runScript(
+      "extract-skeleton.py",
+      [],
+      createPiSummaryContextSession()
+    )
+    expect(exitCode).toBe(0)
+    expect(stdout).toContain("compaction_summary_keyword")
+    expect(stdout).toContain("branch_summary_keyword")
+    expect(stdout).toContain("custom_message_keyword")
+    expect(stdout).toContain("kept_after_compaction_keyword")
+    expect(stdout).not.toContain("old_compacted_keyword")
+    expect(stdout).not.toContain("old-compacted.test.ts")
+  })
+
   test("outputs _meta with stats", async () => {
     const fixture = await Bun.file(
       path.join(FIXTURES_DIR, "claude-session.jsonl")
@@ -1184,6 +1213,18 @@ describe("extract-errors", () => {
     expect(stdout).not.toContain("abandoned-branch.test.ts")
     const meta = JSON.parse(stdout.trim().split("\n").at(-1)!)
     expect(meta.errors_found).toBe(1)
+  })
+
+  test("filters Pi error extraction to post-compaction context", async () => {
+    const { stdout, exitCode } = await runScript(
+      "extract-errors.py",
+      [],
+      createPiSummaryContextSession()
+    )
+    expect(exitCode).toBe(0)
+    expect(stdout).not.toContain("old-compacted.test.ts")
+    const meta = JSON.parse(stdout.trim().split("\n").at(-1)!)
+    expect(meta.errors_found).toBe(0)
   })
 
   test("outputs _meta with error count", async () => {

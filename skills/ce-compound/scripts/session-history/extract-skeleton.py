@@ -44,7 +44,7 @@ _original_stdout = sys.stdout
 if args.output:
     sys.stdout = io.StringIO()
 
-stats = {"lines": 0, "parse_errors": 0, "user": 0, "assistant": 0, "tool": 0}
+stats = {"lines": 0, "parse_errors": 0, "user": 0, "assistant": 0, "tool": 0, "summary": 0}
 
 # Claude Code wrapper tags to strip from user message content.
 # Strip entirely (tag + content): framework noise and raw command output.
@@ -307,12 +307,56 @@ def _pi_active_path_objects(objects):
     ]
 
 
+def _pi_context_objects(objects):
+    """Return Pi entries that participate in active LLM context."""
+    active = _pi_active_path_objects(objects)
+    compactions = [obj for obj in active if obj.get("type") == "compaction"]
+    if not compactions:
+        return active
+
+    first_kept = compactions[-1].get("firstKeptEntryId")
+    if not isinstance(first_kept, str):
+        return active
+
+    started = False
+    context = []
+    for obj in active:
+        if obj.get("type") == "session":
+            context.append(obj)
+            continue
+        if obj.get("id") == first_kept:
+            started = True
+        if started:
+            context.append(obj)
+    return context if len(context) > 1 else active
+
+
 def handle_pi(obj):
     """Pi sessions: type='message' with message.role and content blocks."""
-    if obj.get("type") != "message":
+    entry_type = obj.get("type")
+    ts = obj.get("timestamp", "")[:19]
+
+    if entry_type in ("compaction", "branch_summary"):
+        text = clean_text(obj.get("summary", ""))
+        if len(text) > 15:
+            flush_tools()
+            print(f"[{ts}] [summary] {text[:800]}")
+            print("---")
+            stats["summary"] += 1
         return
 
-    ts = obj.get("timestamp", "")[:19]
+    if entry_type == "custom_message":
+        text = clean_text(" ".join(_pi_text_content(obj.get("content", []))))
+        if len(text) > 15:
+            flush_tools()
+            print(f"[{ts}] [summary] {text[:800]}")
+            print("---")
+            stats["summary"] += 1
+        return
+
+    if entry_type != "message":
+        return
+
     msg = obj.get("message", {})
     role = msg.get("role", "")
     content = msg.get("content", [])
@@ -490,7 +534,7 @@ for line in buffer:
         stats["parse_errors"] += 1
 
 if detected == "pi":
-    objects = _pi_active_path_objects(objects)
+    objects = _pi_context_objects(objects)
 
 for obj in objects:
     try:

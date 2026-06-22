@@ -128,6 +128,30 @@ def _pi_active_path_objects(objects):
     ]
 
 
+def _pi_context_objects(objects):
+    """Return Pi entries that participate in active LLM context."""
+    active = _pi_active_path_objects(objects)
+    compactions = [obj for obj in active if obj.get("type") == "compaction"]
+    if not compactions:
+        return active
+
+    first_kept = compactions[-1].get("firstKeptEntryId")
+    if not isinstance(first_kept, str):
+        return active
+
+    started = False
+    context = []
+    for obj in active:
+        if obj.get("type") == "session":
+            context.append(obj)
+            continue
+        if obj.get("id") == first_kept:
+            started = True
+        if started:
+            context.append(obj)
+    return context if len(context) > 1 else active
+
+
 def handle_pi(obj):
     if obj.get("type") != "message":
         return
@@ -206,7 +230,7 @@ for line in buffer:
         stats["parse_errors"] += 1
 
 if detected == "pi":
-    objects = _pi_active_path_objects(objects)
+    objects = _pi_context_objects(objects)
 
 for obj in objects:
     try:

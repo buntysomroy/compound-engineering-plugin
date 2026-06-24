@@ -58,6 +58,7 @@ For the full catalog and how each skill chains together, see [docs/skills](docs/
 
 ```text
 /ce-ideate new drawing tools
+/ce-ideate surprise me
 /ce-ideate github issues   # ground ideas in your open issues instead of a prompt
 ```
 

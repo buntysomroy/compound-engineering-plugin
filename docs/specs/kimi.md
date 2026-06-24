@@ -6,6 +6,7 @@ Last verified: 2026-06-24
 
 ```
 https://www.kimi.com/code/docs/en/kimi-code-cli/customization/plugins.html
+https://www.kimi.com/code/docs/en/kimi-code-cli/customization/agents.html
 ```
 
 ## Plugin manifests
@@ -69,3 +70,17 @@ Marketplace browsing:
 ```
 
 After installing, enabling, disabling, or removing a plugin, Kimi requires `/reload` or a new session for changes to apply.
+
+## Instruction files
+
+Kimi uses `AGENTS.md` for global and project instructions, not a `KIMI.md` file.
+
+Documented locations include:
+
+| Scope | Location |
+| --- | --- |
+| Global Kimi-specific | `$KIMI_CODE_HOME/AGENTS.md`, defaulting to `~/.kimi-code/AGENTS.md` |
+| Generic cross-tool | `~/.agents/AGENTS.md` |
+| Project | `.kimi-code/AGENTS.md` or `AGENTS.md` under the project tree |
+
+This repo should not add a root `KIMI.md` compatibility shim unless Kimi documents support for that filename. The existing root `AGENTS.md` is already the canonical project instruction file for Kimi-compatible project context.

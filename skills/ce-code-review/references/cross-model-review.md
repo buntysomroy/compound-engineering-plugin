@@ -78,7 +78,7 @@ echo "XPEER_MODE: $XMODE"
 
 `<run-id>` is the Stage 4 run id; `<base>` is the Stage 1 `BASE`; `<repo-root>` is `git rev-parse --show-toplevel`.
 
-- Read `references/findings-schema.json` (the orchestrator has it as a read-time reference) and write it verbatim to `/tmp/compound-engineering/ce-code-review/<run-id>/xmodel-schema.json`.
+- **Claude peer only:** read `references/findings-schema.json` (the orchestrator has it as a read-time reference) and write it verbatim to `/tmp/compound-engineering/ce-code-review/<run-id>/xmodel-schema.json` for `--json-schema`. Skip this for a Codex peer — the Codex path sends no response schema (Step 5).
 - Compose `/tmp/compound-engineering/ce-code-review/<run-id>/xmodel-prompt.txt` from the **same** `references/personas/adversarial-reviewer.md` brief the in-process pass uses, then append:
   > Run: `git diff <base>` to see the changes on this branch and review ONLY those changes. Return ONE JSON object matching the provided schema, with `reviewer` set to `adversarial-<peer>`. No prose outside the JSON.
 
@@ -92,13 +92,14 @@ Peer = codex (host = claude or cursor):
 XDIR=/tmp/compound-engineering/ce-code-review/<run-id>
 codex exec - \
   -C <repo-root> -s read-only \
-  --output-schema "$XDIR/xmodel-schema.json" \
   -o "$XDIR/adversarial-codex.json" \
   -c 'model_reasoning_effort="high"' \
   < "$XDIR/xmodel-prompt.txt"
 ```
 
-Prompt is fed on stdin via `-` (documented: "if `-` is used, instructions are read from stdin") rather than a `"$(cat …)"` argv — avoids ARG_MAX/quoting edge cases on a large brief, and stdin EOF means no hang (no `< /dev/null` needed). `--output-schema` is **best-effort**: some Codex models reject a response schema. If the configured model errors on it, drop `--output-schema` (or pin `-m` to a structured-output-capable model) — `-o` still writes the model's final message and the prompt already demands JSON-only, so Stage 5's malformed-drop handles a non-conforming return.
+Prompt is fed on stdin via `-` (documented: "if `-` is used, instructions are read from stdin") rather than a `"$(cat …)"` argv — avoids ARG_MAX/quoting edge cases on a large brief, and stdin EOF means no hang (no `< /dev/null` needed).
+
+**No `--output-schema` on the Codex path.** Codex's response schema runs OpenAI *strict* structured-output (every object needs `additionalProperties:false` and all fields in `required`), which the permissive `findings-schema.json` is not — Codex rejects it and you waste a full call before retrying without it. So don't send it: the prompt already demands JSON-only and `-o` captures the model's final message, with Stage 5's malformed-drop as the backstop. (The Claude path keeps `--json-schema`, which is lenient and works.) `xmodel-schema.json` is therefore only used by the Claude path; don't write it for a Codex peer.
 
 Peer = claude (host = codex):
 
@@ -113,7 +114,9 @@ jq -e '.structured_output' "$XDIR/adversarial-claude.raw.json" > "$XDIR/adversar
   || jq -r '.result // empty' "$XDIR/adversarial-claude.raw.json" > "$XDIR/adversarial-claude.json"
 ```
 
-**Run this as a blocking Bash call** (set the Bash tool `timeout` to `300000`, 5 min) and wait for it to finish before Stage 5 — the cross-model return must be on disk before the merge reads it. `< /dev/null` prevents the stdin-deadlock hang on the Claude path (the Codex path gets EOF from its prompt file).
+**Launch this as a background shell process in the Stage 4 dispatch wave** (concurrent with the persona reviewers); it writes its result to the run-dir file above, so it runs unattended while the in-process reviews proceed. Then **collect it before Stage 5** — the cross-model return must be on disk before the merge reads it.
+
+Bound it with a 5-min cap (the Bash tool `timeout` set to `300000`, or the platform equivalent); if it hasn't written its result file by then, skip the pass — a missing cross-model artifact is the correct non-blocking outcome and never blocks or fails the review. If the harness can't background a shell command, run it inline before awaiting the reviewers (same cap). `< /dev/null` prevents the stdin-deadlock hang on the Claude path (the Codex path gets EOF from its prompt file).
 
 Read-only is enforced differently per peer, and they are not equally strong: **codex `-s read-only` is a hard sandbox**. **Claude's `dontAsk` is permission-gated, not a kernel sandbox** — it auto-runs only read-only Bash and the user's `permissions.allow` entries and denies the rest without prompting, so a user who has broadly allow-listed Bash (e.g. `Bash(*)`) could still let the peer mutate. The peer only needs read-only `git`, so this matters only with broad pre-existing allow-rules; `--disallowedTools "Edit Write NotebookEdit"` blocks the file-edit tools regardless.
 
@@ -137,9 +140,9 @@ The capture mechanisms differ by necessity: codex `-o` is written by Codex itsel
 | Concern | claude `-p` (peer) | codex `exec` (peer) |
 |---------|--------------------|---------------------|
 | read-only | `--permission-mode dontAsk` + `--disallowedTools "Edit Write NotebookEdit"` (permission-gated, not a hard sandbox) | `-s read-only` (hard sandbox) |
-| schema out | `--json-schema "$(cat schema)"` + `--output-format json` -> `.structured_output`, fall back to `.result` | `--output-schema <file>` (best-effort) + `-o <file>` |
+| schema out | `--json-schema "$(cat schema)"` + `--output-format json` -> `.structured_output`, fall back to `.result` | none — `-o <file>` capture only (strict mode rejects the permissive schema); prompt demands JSON |
 | prompt in | `"$(cat prompt)"` argv + `< /dev/null` | `-` on stdin: `< prompt-file` |
-| effort/model | `--model opus` | `-c 'model_reasoning_effort="high"'` (pin `-m` if the model rejects `--output-schema`) |
+| effort/model | `--model opus` | `-c 'model_reasoning_effort="high"'` |
 | turn cap | `--max-turns 15` | (wall-clock timeout) |
 | no hang | `< /dev/null` | stdin EOF from prompt file |
 | parse dep | `jq` (preflighted in Step 2) | none (`-o` writes the file) |

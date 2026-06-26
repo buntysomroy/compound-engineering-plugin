@@ -131,13 +131,13 @@ case "$PEER" in
       "$TO_BIN" -k 10 "$HARD_SECS" claude -p --model opus --permission-mode dontAsk \
         --disallowedTools Edit Write NotebookEdit MultiEdit Bash --max-turns 15 --no-session-persistence \
         --json-schema "$(cat "$SCHEMA")" --output-format json \
-        "$(cat "$PROMPT_FILE")" < /dev/null > "$PEERLOG" 2>/dev/null \
+        < "$PROMPT_FILE" > "$PEERLOG" 2>/dev/null \
         || log "claude exited non-zero or timed out"
     else
       perl -e 'alarm shift; exec @ARGV' "$HARD_SECS" claude -p --model opus --permission-mode dontAsk \
         --disallowedTools Edit Write NotebookEdit MultiEdit Bash --max-turns 15 --no-session-persistence \
         --json-schema "$(cat "$SCHEMA")" --output-format json \
-        "$(cat "$PROMPT_FILE")" < /dev/null > "$PEERLOG" 2>/dev/null \
+        < "$PROMPT_FILE" > "$PEERLOG" 2>/dev/null \
         || log "claude exited non-zero or timed out"
     fi
     jq -e '.structured_output' "$PEERLOG" > "$OUT" 2>/dev/null \
@@ -152,11 +152,17 @@ esac
 # and lose the cross-model agreement signal. Force the distinct name.
 if [ -s "$OUT" ]; then
   _norm="$(mktemp "${TMPDIR:-/tmp}/xmodel-norm-XXXXXX")"
-  if jq --arg r "adversarial-$PEER" '.reviewer = $r' "$OUT" > "$_norm" 2>/dev/null; then mv "$_norm" "$OUT"; else rm -f "$_norm"; fi
+  # Force the distinct reviewer name AND satisfy Stage 5's full top-level contract
+  # (reviewer string + findings/residual_risks/testing_gaps arrays). Backfill the two
+  # soft arrays if the peer omitted them; drop the return entirely if findings is not
+  # an array (empty output -> the validation below removes the file -> clean skip).
+  if jq --arg r "adversarial-$PEER" \
+       'if (.findings|type)=="array" then {reviewer:$r, findings, residual_risks:(.residual_risks // []), testing_gaps:(.testing_gaps // [])} else empty end' \
+       "$OUT" > "$_norm" 2>/dev/null; then mv "$_norm" "$OUT"; else rm -f "$_norm"; fi
 fi
 
-# --- validate the output ---------------------------------------------------
-if [ -s "$OUT" ] && jq -e '.findings' "$OUT" >/dev/null 2>&1; then
+# --- validate the output against the Stage 5 reviewer-return contract -------
+if [ -s "$OUT" ] && jq -e '(.reviewer|type=="string") and (.findings|type=="array") and (.residual_risks|type=="array") and (.testing_gaps|type=="array")' "$OUT" >/dev/null 2>&1; then
   n="$(jq '.findings | length' "$OUT" 2>/dev/null || echo '?')"
   log "wrote $n finding(s) to $OUT (reviewer adversarial-$PEER)"
 else

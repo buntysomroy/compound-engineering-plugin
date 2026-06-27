@@ -259,6 +259,22 @@ describe("unified plan artifact contract", () => {
     expect(planSections).toMatch(/blocker resolution \/\s*planning/i)
   })
 
+  test("a requirements-only path is an enrichment input, not a Phase 0.1 resume target", () => {
+    // Codex P1 (PR #972): lfg hands ce-plan a requirements-only docs/plans/ path
+    // in disable-model-invocation pipeline mode; Phase 0.1's "confirm update-or-
+    // create" fires on any referenced docs/plans/ file BEFORE Phase 0.2's
+    // enrich-in-place rule, with no user to answer -> the hands-off flow strands.
+    // Phase 0.1 must carve requirements-only plans out of the resume prompt and
+    // auto-resolve the resume choice in pipeline mode.
+    const phaseStart = planSkill.indexOf("#### 0.1 Resume Existing Plan Work")
+    expect(phaseStart).toBeGreaterThan(-1)
+    const region = planSkill.slice(phaseStart, phaseStart + 1600)
+    expect(/requirements-only unified plan is not a resume target/i.test(region)).toBe(true)
+    expect(/do \*?\*?not\*?\*? fire the update-or-create confirm/i.test(region)).toBe(true)
+    expect(/Fall through to Phase 0\.2/i.test(region)).toBe(true)
+    expect(/pipeline mode the resume choice is made automatically|never prompted/i.test(region)).toBe(true)
+  })
+
   test("large plans get a navigation-only Unit Index, gated to ~10+ units", () => {
     expect(planSections).toMatch(/Unit Index \(large plans only/i)
     expect(planSections).toMatch(/ten or more\s+units/i)

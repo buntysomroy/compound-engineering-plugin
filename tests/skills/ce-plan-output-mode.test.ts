@@ -19,6 +19,11 @@ const PLAN_SECTIONS_PATH = path.join(
   "skills/ce-plan/references/plan-sections.md",
 )
 
+const SYNTHESIS_SUMMARY_PATH = path.join(
+  process.cwd(),
+  "skills/ce-plan/references/synthesis-summary.md",
+)
+
 // Regression guard for the `output:html` / `output:md` argument on ce-plan.
 // Under exclusive output mode, the plan is written as EITHER markdown OR
 // HTML — never both. The skill body must carry the load-bearing surface:
@@ -284,5 +289,86 @@ describe("ce-plan output:html mode", () => {
     expect(/Affordance idioms/i.test(body)).toBe(true)
     expect(/Agent-consumability rules/i.test(body)).toBe(true)
     expect(/Post-compose audit/i.test(body)).toBe(true)
+  })
+})
+
+describe("ce-plan scoping-confirmation setting", () => {
+  test("Phase 0.0 defaults to asking and treats skip as explicit opt-in", () => {
+    const phaseStart = SKILL_BODY.indexOf("#### 0.0")
+    expect(phaseStart).toBeGreaterThan(-1)
+    const phaseRegion = SKILL_BODY.slice(phaseStart, phaseStart + 7000)
+
+    expect(
+      /SKIP_SCOPING_CONFIRM/.test(phaseRegion),
+      "Phase 0.0 must resolve SKIP_SCOPING_CONFIRM inline before any scoping gate fires.",
+    ).toBe(true)
+    expect(
+      /boolean, default `false`|default `false`|Default\.[\s\S]*ask/i.test(
+        phaseRegion,
+      ),
+      "The scoping-confirmation setting must default to asking; skip must stay opt-in.",
+    ).toBe(true)
+    expect(
+      /confirm:auto[\s\S]*skips the gate/.test(phaseRegion) &&
+        /confirm:ask[\s\S]*forces it on/.test(phaseRegion),
+      "Phase 0.0 must document `confirm:auto` as the per-run skip and `confirm:ask` as the per-run force-ask override.",
+    ).toBe(true)
+    expect(
+      /plan_skip_scoping_confirm/.test(phaseRegion),
+      "Phase 0.0 must name the persisted `plan_skip_scoping_confirm` config key.",
+    ).toBe(true)
+    expect(
+      /active.*non-commented|non-commented.*plan_skip_scoping_confirm|Commented.*fall through/i.test(
+        phaseRegion,
+      ),
+      "The config rule must require an active, non-commented `plan_skip_scoping_confirm:` key so the shipped commented example does not disable the default gate.",
+    ).toBe(true)
+  })
+
+  test("opt-in skip is scoped to the scoping gate and preserves later gates", () => {
+    const soloStart = SKILL_BODY.indexOf("#### 0.7 Solo-Mode Scoping Synthesis")
+    const brainstormStart = SKILL_BODY.indexOf(
+      "#### 5.1.5 Brainstorm-Sourced Scoping Synthesis",
+    )
+    expect(soloStart).toBeGreaterThan(-1)
+    expect(brainstormStart).toBeGreaterThan(-1)
+
+    for (const [label, region] of [
+      ["solo", SKILL_BODY.slice(soloStart, soloStart + 7000)],
+      ["brainstorm-sourced", SKILL_BODY.slice(brainstormStart, brainstormStart + 7000)],
+    ] as const) {
+      expect(
+        /override the tier guard for \*this gate only\*/.test(region),
+        `${label} scoping gate must say SKIP_SCOPING_CONFIRM overrides only this gate.`,
+      ).toBe(true)
+      expect(
+        /Scoping confirmation is off/.test(region) &&
+          /Inferred scope is recorded under Assumptions/.test(region),
+        `${label} scoping gate must announce the skip and where inferred scope goes.`,
+      ).toBe(true)
+      expect(
+        /Phase 0\.4 routing|Phase 0\.4/.test(region) &&
+          /Phase 0\.5/.test(region) &&
+          /Phase 2/.test(region) &&
+          /source-doc disambiguation/.test(region) &&
+          /Phase 5\.4/.test(region),
+        `${label} scoping gate must state that genuine blockers and the post-plan menu still fire.`,
+      ).toBe(true)
+    }
+  })
+
+  test("synthesis-summary routes inferred bets to Assumptions for opt-in skip", () => {
+    const body = readFileSync(SYNTHESIS_SUMMARY_PATH, "utf8")
+
+    expect(
+      /opt-in `SKIP_SCOPING_CONFIRM`/.test(body),
+      "synthesis-summary.md must describe the opt-in skip alongside the existing auto-proceed/headless cases.",
+    ).toBe(true)
+    expect(
+      /non-interactive mode or opt-in `SKIP_SCOPING_CONFIRM` runs, route to Planning Contract `### Assumptions`/.test(
+        body,
+      ),
+      "The doc-shape routing table must route inferred bullets to Assumptions for opt-in skip runs, not only headless runs.",
+    ).toBe(true)
   })
 })

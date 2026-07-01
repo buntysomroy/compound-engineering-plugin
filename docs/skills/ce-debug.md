@@ -78,7 +78,7 @@ If you opt to fix (rather than "diagnosis only"), the skill writes a failing tes
 
 ### 7. Post-fix polish and review
 
-After the root-cause fix is green, `ce-debug` conditionally runs the same quality tail used by the broader shipping workflow: simplify first when the diff is non-mechanical and large enough to benefit, then review the final fix. Tiny mechanical fixes skip this with a reason. On pre-existing dirty branches, simplify and review are scoped to the bug-fix files so they do not wander into unrelated user work. The skill records the tail in a Post-Fix Quality block before commit or PR handoff.
+After the root-cause fix is green, `ce-debug` conditionally runs the same quality tail used by the broader shipping workflow: simplify first when the diff is non-mechanical and large enough to benefit, then review the final fix. Tiny mechanical fixes skip this with a reason. On pre-existing dirty branches, simplify and review are scoped to the bug-fix files so they do not wander into unrelated user work; files with overlapping pre-existing edits skip file-level simplification. The skill records the tail in a Post-Fix Quality block before commit or PR handoff, and accepted residual findings are written to a durable sink even when the user chooses commit-only or stop.
 
 ### 8. Conditional defense-in-depth
 

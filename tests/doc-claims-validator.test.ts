@@ -64,7 +64,14 @@ beforeAll(() => {
   sh(repo, "git", ["config", "user.name", "Test"])
   mkdirSync(path.join(repo, "src"), { recursive: true })
   mkdirSync(path.join(repo, "docs/solutions/workflow"), { recursive: true })
+  mkdirSync(path.join(repo, "docs/solutions/best-practices"), {
+    recursive: true,
+  })
   writeFileSync(path.join(repo, "src/real-file.ts"), "export const x = 1\n")
+  writeFileSync(
+    path.join(repo, "docs/solutions/best-practices/linked-target.md"),
+    "# linked target\n",
+  )
   writeFileSync(
     path.join(repo, "docs/solutions/workflow/existing-doc.md"),
     "# existing\n",
@@ -230,6 +237,38 @@ describe("validate-doc-claims script", () => {
         expect(result.code).toBe(1)
         expect(result.stdout).toContain("FLAG scaffold")
         expect(result.stdout).toContain("{{DOC:3}}")
+      })
+
+      test("resolves a `../` code-formatted link label from the doc's location", () => {
+        const docPath = writeRepoDoc(
+          "See [`../best-practices/linked-target.md`]" +
+            "(../best-practices/linked-target.md) for the pattern.\n",
+        )
+        const result = runValidator(skillDir, docPath)
+        expect(result.code).toBe(0)
+        expect(result.stdout).not.toContain("FLAG")
+      })
+
+      test("flags a `../` cited path whose doc-relative target is missing", () => {
+        const docPath = writeRepoDoc(
+          "See `../best-practices/does-not-exist.md` for background.\n",
+        )
+        const result = runValidator(skillDir, docPath)
+        expect(result.code).toBe(1)
+        expect(result.stdout).toContain(
+          "FLAG path `../best-practices/does-not-exist.md`",
+        )
+        expect(result.stdout).toContain("not found")
+      })
+
+      test("skips a `../` token that escapes the repository", () => {
+        // Four levels up from docs/solutions/workflow lands outside the repo.
+        const docPath = writeRepoDoc(
+          "The temp copy was `../../../../outside-repo.md` during the run.\n",
+        )
+        const result = runValidator(skillDir, docPath)
+        expect(result.code).toBe(0)
+        expect(result.stdout).not.toContain("FLAG")
       })
 
       test("flags a relative markdown link that does not resolve", () => {

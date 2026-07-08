@@ -14,11 +14,12 @@ validate-frontmatter.py (parser-safety) — this script checks the body's
 citations against the repository:
 
     1. Cited repo-relative paths (backticked, containing at least one '/')
-       exist in the working tree; misses tracked at HEAD or the upstream
-       default branch still count as real paths and are classified
-       (deleted/uncommitted vs stale checkout). Tokens missing everywhere
-       are flagged only when path-shaped; slash-delimited identifiers
-       (branch names, git refs, provider/model IDs) are skipped.
+       exist in the working tree; tokens containing '../' resolve from the
+       doc's directory (those escaping the repo are skipped). Misses tracked
+       at HEAD or the upstream default branch still count as real paths and
+       are classified (deleted/uncommitted vs stale checkout). Tokens
+       missing everywhere are flagged only when path-shaped; slash-delimited
+       identifiers (branch names, git refs, provider/model IDs) are skipped.
     2. Cited commit SHAs (7-40 hex chars with at least one digit and one
        a-f letter) resolve to commits, classified by reachability from
        HEAD and the upstream default branch.
@@ -200,16 +201,28 @@ def main(argv: list[str]) -> int:
     base = repo_root if in_git else os.getcwd()
     for raw in BACKTICK_RE.findall(body):
         token = normalize_path(raw)
-        if not is_path_candidate(token) or token in seen_paths:
+        if not is_path_candidate(token):
             continue
-        seen_paths.add(token)
-        if os.path.exists(os.path.join(base, token)):
+        check = token
+        if token.startswith("../") or "/../" in token:
+            # A `../` citation is doc-relative (matching how markdown links
+            # resolve), so map it to a repo-root path before checking.
+            if not in_git:
+                continue
+            resolved = os.path.realpath(os.path.join(doc_dir, token))
+            check = os.path.relpath(resolved, os.path.realpath(base))
+            if check.startswith(".."):
+                continue  # escapes the repo — not checkable as a repo path
+        if check in seen_paths:
+            continue
+        seen_paths.add(check)
+        if os.path.exists(os.path.join(base, check)):
             checked_paths += 1
             continue
-        tracked_head = head_has_path(token)
-        tracked_upstream = upstream_has_path(token)
+        tracked_head = head_has_path(check)
+        tracked_upstream = upstream_has_path(check)
         if not (tracked_head or tracked_upstream) and not is_path_shaped(
-            token, base
+            check, base
         ):
             continue  # branch name / provider ID, not a path citation
         checked_paths += 1

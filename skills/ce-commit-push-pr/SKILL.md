@@ -100,7 +100,7 @@ Otherwise, if the branch diff changes observable behavior (UI, CLI output, API b
 
 Do not block PR creation solely because no visual artifact exists. Test output and manual validation notes are acceptable validation evidence, but do not label test output as "Demo" or "Screenshots."
 
-**Concept teaching gate** before composition. Resolve the repo root (`git rev-parse --show-toplevel`) and read `.compound-engineering/config.local.yaml` with the native file-read tool. Only an **active (non-commented)** `pr_teaching_section:` key counts — lines starting with `#` are YAML comments, and the shipped template documents keys as commented examples; matching those would silently flip the gate. Missing file or key means the default: **on**. The same read resolves `pr_teaching_archive:` (default: **off**); a per-run `archive:on|off` token overrides the archive key for this invocation.
+**Concept teaching gate** before composition. Resolve the repo root (`git rev-parse --show-toplevel`) and read `.compound-engineering/config.local.yaml` with the native file-read tool. Only an **active (non-commented)** `pr_teaching_section:` key counts — lines starting with `#` are YAML comments, and the shipped template documents keys as commented examples; matching those would silently flip the gate. The gate is off only when the active value is exactly `false`; a missing file, missing key, or any other value means the default: **on**. The same read resolves `pr_teaching_archive:` — on only when the active value is exactly `true`, otherwise **off** — and a per-run `archive:on|off` token overrides the archive key for this invocation.
 
 - Gate **on** — judge concept novelty and compose the section per **Step B2** of the reference. The gate is single: when it is off, skip judgment, the section, the Step 5 trailer and offer, and archival entirely.
 - Gate **off** — compose the description without any concept handling.
@@ -122,14 +122,14 @@ Then continue with the rest of the reference (Steps A through D, including the S
 
 **Explainer archival** — runs only in full workflow, with `pr_teaching_archive` on, a composed `## New concepts` section, and the apply confirmed (new-PR create, or existing-PR rewrite accepted); a declined rewrite skips archival entirely so no unlinked doc commit is left behind. Execute as explicit transitions immediately before the `gh` call:
 
-1. Write `docs/explainers/YYYY-MM-DD-<concept-slug>.md` (create the directory if needed) with YAML frontmatter `title`, `date`, `input_shape: concept`, `subject`, and the teaching content.
-2. `git check-ignore -q docs/explainers/<file>` — if the path is ignored, print a one-line warning and skip archival (never `git add -f`).
+1. `git check-ignore -q docs/explainers/YYYY-MM-DD-<concept-slug>.md` — the check works on not-yet-created paths. If the path is ignored, print a one-line warning and skip archival entirely, writing nothing (never `git add -f`).
+2. Write the file (create the directory if needed) with YAML frontmatter `title`, `date`, `input_shape: concept`, `subject`, and the teaching content.
 3. `git add` that file only (never `-A`), commit with `docs(explainer): teach <concept>`, and push.
 4. Splice a head-branch blob URL to the doc into the `## New concepts` section before applying.
 
 If the doc write or commit fails, warn and continue to PR creation without the link — never strand the flow between commit and PR.
 
-**Concept trailer** — when the applied body contains a `## New concepts` section, print one line after the PR URL in every mode: `New concepts: <name>[, <name>]`. In interactive runs follow it with: `Run /ce-explain <name> to go deeper.` No trailer when the rewrite was declined or no PR exists.
+**Concept trailer** — when a body applied by this run contains a `## New concepts` section, print one line after the PR URL in every mode: `New concepts: <name>[, <name>]`. In interactive runs follow it with: `Run /ce-explain <name> to go deeper.` No trailer when this run applied no body — including a rewrite that was declined or pipeline-defaulted to no — or no PR exists.
 
 ---
 

@@ -1,6 +1,7 @@
 ---
 name: ce-commit-push-pr
 description: Commit, push, and open a PR. Use when asked to ship/open a PR, or for PR-description-only flows like writing, rewriting, or describing a PR body.
+argument-hint: "[PR ref] [mode:pipeline] [archive:on|off]"
 ---
 
 # Git Commit, Push, and PR
@@ -12,6 +13,8 @@ description: Commit, push, and open a PR. Use when asked to ship/open a PR, or f
 - **Description-only** — user wants *just* a description ("write/draft a PR description", "describe this PR", or pasted a PR URL/number alone). Run Step 4 only; print the result. Apply only if the user asks. If a PR ref was pasted, pass it to Step 4 so Pre-A resolves the right range.
 - **Description update** — user wants to refresh/rewrite an existing PR's description with no commit/push intent. If no open PR, report and stop. Otherwise run Step 4 (PR mode using the existing PR's URL), then Step 5 to preview, confirm, and apply via `gh pr edit`.
 - **Full workflow** — otherwise. Run Steps 1-5 in order.
+
+**`mode:pipeline` modifier** — set by orchestrated callers (e.g., `lfg`). Run the resolved mode non-interactively: suppress every blocking ask. Step 5's existing-PR rewrite question defaults to **not rewriting**; any other suppressed ask takes its conservative documented default (keep the current branch; if Pre-A cannot resolve a base, stop and report rather than guess).
 
 ## Context
 
@@ -97,7 +100,12 @@ Otherwise, if the branch diff changes observable behavior (UI, CLI output, API b
 
 Do not block PR creation solely because no visual artifact exists. Test output and manual validation notes are acceptable validation evidence, but do not label test output as "Demo" or "Screenshots."
 
-Then continue with the rest of the reference (Steps A through G) to compose the title and body.
+**Concept teaching gate** before composition. Resolve the repo root (`git rev-parse --show-toplevel`) and read `.compound-engineering/config.local.yaml` with the native file-read tool. Only an **active (non-commented)** `pr_teaching_section:` key counts — lines starting with `#` are YAML comments, and the shipped template documents keys as commented examples; matching those would silently flip the gate. Missing file or key means the default: **on**. The same read resolves `pr_teaching_archive:` (default: **off**); a per-run `archive:on|off` token overrides the archive key for this invocation.
+
+- Gate **on** — judge concept novelty and compose the section per **Step B2** of the reference. The gate is single: when it is off, skip judgment, the section, the Step 5 trailer and offer, and archival entirely.
+- Gate **off** — compose the description without any concept handling.
+
+Then continue with the rest of the reference (Steps A through D, including the Step B2 concept judgment when the gate is on) to compose the title and body.
 
 ## Step 5: Apply and report
 
@@ -111,6 +119,17 @@ Then continue with the rest of the reference (Steps A through G) to compose the 
 - **Yes** — run Step 4 if not already done, then preview and apply (see below).
 
 **Description update mode, or existing-PR rewrite confirmed** — preview before applying. Ask: "New title: `<title>` (`<N>` chars). Summary leads with: `<first two sentences>`. Total body: `<L>` lines. Apply?" If declined, the user may pass focus text back for a regenerate; do not apply. If confirmed, apply per "Applying via gh" below using `gh pr edit` and report the URL.
+
+**Explainer archival** — runs only in full workflow, with `pr_teaching_archive` on, a composed `## New concepts` section, and the apply confirmed (new-PR create, or existing-PR rewrite accepted); a declined rewrite skips archival entirely so no unlinked doc commit is left behind. Execute as explicit transitions immediately before the `gh` call:
+
+1. Write `docs/explainers/YYYY-MM-DD-<concept-slug>.md` (create the directory if needed) with YAML frontmatter `title`, `date`, `input_shape: concept`, `subject`, and the teaching content.
+2. `git check-ignore -q docs/explainers/<file>` — if the path is ignored, print a one-line warning and skip archival (never `git add -f`).
+3. `git add` that file only (never `-A`), commit with `docs(explainer): teach <concept>`, and push.
+4. Splice a head-branch blob URL to the doc into the `## New concepts` section before applying.
+
+If the doc write or commit fails, warn and continue to PR creation without the link — never strand the flow between commit and PR.
+
+**Concept trailer** — when the applied body contains a `## New concepts` section, print one line after the PR URL in every mode: `New concepts: <name>[, <name>]`. In interactive runs follow it with: `Run /ce-explain <name> to go deeper.` No trailer when the rewrite was declined or no PR exists.
 
 ---
 

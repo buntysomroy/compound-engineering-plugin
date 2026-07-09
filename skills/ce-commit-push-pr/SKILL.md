@@ -108,7 +108,7 @@ Do not block PR creation solely because no visual artifact exists. Test output a
 - Gate **on** — judge concept novelty and compose the section per **Step B2** of the reference. The gate is single: when it is off, skip judgment, the section, the Step 5 trailer and offer, and archival entirely.
 - Gate **off** — compose the description without any concept handling.
 
-Then continue with the rest of the reference (Steps A through D, including the Step B2 concept judgment when the gate is on) to compose the title and body.
+Then continue with the rest of the reference (Steps A through E, including the Step B2 concept judgment when the gate is on) to compose the title and body — Step E is the pre-apply coverage audit and must run before the body is returned.
 
 ## Step 5: Apply and report
 

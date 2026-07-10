@@ -34,7 +34,11 @@ If the session model is already Fable, elevation is moot: skip dispatch and the 
 When elevation is active, dispatch the reasoning-heavy step to a Fable subagent:
 
 - Use the platform subagent primitive with a per-agent model override of **fable** (`model: "fable"` on the Claude Code `Agent`/`Task` tool).
-- Pass the main agent's full working context as **file paths the subagent reads itself**, never a re-narrated prose brief. Assemble the paths before dispatch: (a) pass any grounding/research artifact this skill already wrote to a scratch path — ce-brainstorm writes a Phase 1.1 grounding dossier there; for ce-plan, pass the Phase 1 consolidated research-findings artifact if one was written; (b) write the accumulated dialogue/decisions this skill holds in context to a **fresh scratch file you create** (e.g. `mktemp` under the OS temp dir) and pass that path too. Re-narration is forbidden: the main model's default tendency is to compress, and a lossy summary is the failure the quality bet cannot absorb — so hand over files, not a summary.
+- Pass the main agent's full working context as **file paths the subagent reads itself**, never a re-narrated prose brief. If a needed piece lives only in context, **write it to a fresh scratch file you create** (e.g. `mktemp` under the OS temp dir) rather than skipping it or summarizing it:
+  - **Research / grounding evidence.** ce-brainstorm already wrote a Phase 1.1 grounding dossier to a scratch path — pass it. ce-plan consolidates its Phase 1 research findings *in context only* (Phase 1.4 summarizes; it does not write a file), so **serialize those consolidated findings to a scratch file now and pass it** — the elevated author must interpret the same research evidence the inline path had, not just the resulting decisions.
+  - **Dialogue / decisions.** Write the accumulated dialogue/decisions this skill holds in context to a fresh scratch file and pass that path too.
+
+  Re-narration is forbidden: the main model's default tendency is to compress, and a lossy summary is the failure the quality bet cannot absorb — so hand over files, not a summary.
 - Tell the subagent that, for this run, elevation **supersedes this skill's default ceiling-tier convention** — that the reasoning-heavy step runs inline in the main conversation with nothing dispatched — for this step only.
 - Relay the Fable output through the main agent, which stays the orchestrator.
 

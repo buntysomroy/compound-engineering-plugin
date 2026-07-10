@@ -36,7 +36,7 @@ The Anthropic advisor-tool pattern points at the fix: a main agent can consult a
 ### Key Decisions
 
 - **Gather cheap, reason expensive.** The research/gathering subagents (repo-research-analyst, learnings-researcher, web-researcher) stay on their current low tiers — the model-gap on "quote the relevant code" is small. Elevation targets only the steps where the weak-vs-strong reasoning gap is large: interpretation and authoring.
-- **Elevation is Claude-Code-only and gated mechanically, not by prose.** The first ordered step is a mechanical host check (the `ce-code-review` env-var pattern: positively identify `CLAUDECODE`; treat `CURSOR_AGENT` / Codex signals as a hard stop). Only on positive Claude identification does any Fable config read, intent parse, or dispatch instruction become active, and all Fable/elevation prose lives in a Claude-gated `references/fable-elevation.md` loaded only on the Claude branch — so it never rides in a Codex/Cursor context. There is **no cross-harness "elevate tier"**: on every other harness elevation does not exist and the ceiling/inline rules apply unchanged. (This reverses an earlier "elevate tier named per harness" framing. Per-harness naming preserved the no-hardcoded-model convention, but the cross-harness peer review — Codex and Cursor independently — showed it invites a non-Claude agent to resolve "elevate" to *its own* top model instead of doing nothing. The no-op has to be an enforced gate, not an obedience-to-prose promise.)
+- **Elevation is Claude-Code-only and gated mechanically, not by prose.** The first ordered step is a mechanical host check (the `ce-code-review` env-var pattern: positively identify `CLAUDECODE`; treat `CURSOR_AGENT` / Codex signals as a hard stop). Only on positive Claude identification does any Fable config read, intent parse, or dispatch instruction become active, and all Fable/elevation prose lives in a Claude-gated `references/reasoning-elevation.md` loaded only on the Claude branch — so it never rides in a Codex/Cursor context. There is **no cross-harness "elevate tier"**: on every other harness elevation does not exist and the ceiling/inline rules apply unchanged. (This reverses an earlier "elevate tier named per harness" framing. Per-harness naming preserved the no-hardcoded-model convention, but the cross-harness peer review — Codex and Cursor independently — showed it invites a non-Claude agent to resolve "elevate" to *its own* top model instead of doing nothing. The no-op has to be an enforced gate, not an obedience-to-prose promise.)
 - **The dispatch reproduces full context, not a lossy summary.** The elevated subagent receives the main agent's working context — accumulated dialogue/decisions plus the grounding dossier — not a compressed brief. The core bet only holds if Fable reasons on the same information the inline main model would have; a serialized summary that drops nuance can make a stronger model on a thin brief lose to a weaker model with full context.
 - **The live dialogue stays on the main model.** Turn-by-turn question generation can't be dispatched to a subagent without per-turn latency that destroys the conversation. Elevation covers batch bursts only; a user who wants Fable driving the actual back-and-forth must run Fable as their session model.
 - **Activate on prompt intent, not keyword match.** The agent reasons over intent ("use fable", "get fable help", "have fable plan this"), so natural phrasing works and a passing mention of the word "fable" as subject matter does not misfire.
@@ -59,12 +59,12 @@ The Anthropic advisor-tool pattern points at the fix: a main agent can consult a
 **Activation and precedence**
 
 - R6. Elevation is gated by a mechanical host check as the **first ordered step**: positively identify Claude Code (e.g. `CLAUDECODE`) and treat known non-Claude signals (`CURSOR_AGENT`, Codex markers) as a hard stop. Only on positive Claude identification does the skill read Fable config keys, parse Fable intent, load elevation instructions, or emit any Fable string. On anything else, elevation is false and fully inert — no Fable config read, no intent parse, no Fable text.
-- R14. All Fable/elevation instructions live in a Claude-gated reference (`references/fable-elevation.md` in each consuming skill), loaded only after R6's positive-Claude check. The always-loaded `SKILL.md` stub carries two harness-neutral, model-name-free lines: (1) "If positively Claude Code, load `references/fable-elevation.md`"; (2) "If the prompt requests a specific model this skill does not recognize on this harness, proceed on the session model without further comment." Line (2) exists because R6 gates the skill's own behavior but cannot gate the agent from its own prompt — a "use fable" mention on Codex/Cursor has already been read, so the stub gives the off-Claude agent explicit harmless guidance instead of leaving it to guess (which risks resolving "fable" to its own top model — the residual leak R6 alone cannot close). No Fable *instructions* ship in a non-Claude context; the two neutral stub lines name no model.
+- R14. All Fable/elevation instructions live in a Claude-gated reference (`references/reasoning-elevation.md` in each consuming skill), loaded only after R6's positive-Claude check. The always-loaded `SKILL.md` stub carries two harness-neutral, model-name-free lines: (1) "If positively Claude Code, load `references/reasoning-elevation.md`"; (2) "If the prompt requests a specific model this skill does not recognize on this harness, proceed on the session model without further comment." Line (2) exists because R6 gates the skill's own behavior but cannot gate the agent from its own prompt — a "use fable" mention on Codex/Cursor has already been read, so the stub gives the off-Claude agent explicit harmless guidance instead of leaving it to guess (which risks resolving "fable" to its own top model — the residual leak R6 alone cannot close). No Fable *instructions* ship in a non-Claude context; the two neutral stub lines name no model.
 - R7. Activation resolves by precedence: in-prompt intent for this run > per-skill config default > off (evaluated only after R6 passes).
 - R8. Prompt activation is by reasoned intent, not literal keyword match. Affirmative intent ("use fable", "get fable help") activates; negative intent ("don't use fable", "no fable") deactivates even when the config default is on. Because "fable" is a common English word, a misfire acceptance example (AE6) guards the dictionary-word collision case.
 - R9. Config exposes two independent per-skill keys, one for plan and one for brainstorm, so either can be enabled without the other. Missing, commented, or invalid values fall through to off — the same tolerant resolution the existing output-format keys use.
 - R13. In pipeline / `disable-model-invocation` runs (e.g. LFG) there is no prompt, so activation comes from the per-skill config alone; if that config is on, elevation fires — but strictly subordinate to R6's mechanical gate, so a config file copied to a non-Claude harness never fires it.
-- R16. The Claude-gated `fable-elevation.md` states explicitly that, when elevation is active, it supersedes `model-tiers.md`'s ceiling-tier "nothing is dispatched" rule for the elevated steps. Without this, the elevated Claude agent holds two contradictory active instructions about whether Phase 2 / synthesis / plan authoring may be dispatched.
+- R16. The Claude-gated `reasoning-elevation.md` states explicitly that, when elevation is active, it supersedes `model-tiers.md`'s ceiling-tier "nothing is dispatched" rule for the elevated steps. Without this, the elevated Claude agent holds two contradictory active instructions about whether Phase 2 / synthesis / plan authoring may be dispatched.
 
 **Transparency and degradation**
 
@@ -85,7 +85,7 @@ The Anthropic advisor-tool pattern points at the fix: a main agent can consult a
 flowchart TB
   A[Skill starts] --> B{Mechanical host check:<br/>positively Claude Code?}
   B -->|no CLAUDECODE / is Cursor or Codex| N[Elevation off, silent<br/>no Fable config/intent/prose]
-  B -->|yes| L[Load Claude-gated<br/>fable-elevation reference]
+  B -->|yes| L[Load Claude-gated<br/>reasoning-elevation reference]
   L --> C{Fable intent in prompt?}
   C -->|affirmative| E[Elevate]
   C -->|negative| F[Do not elevate]
@@ -178,7 +178,7 @@ Diagram shows the end-to-end path: F1 activation resolution (host check → inte
 ### Key Technical Decisions
 
 - KTD1. **Reuse the `ce-code-review` env-var host gate verbatim — do not invent detection.** R6's mechanical gate is the exact union from `skills/ce-code-review/references/cross-model-review.md` Step 1: `CLAUDECODE=1` → Claude; `CURSOR_AGENT`/`CURSOR_CONVERSATION_ID` → Cursor; `CODEX_SANDBOX`/`CODEX_SESSION_ID`/… → Codex; else `unknown`. Only a positive Claude identification proceeds; every other result (including `unknown`) is inert. That reference already documents why the union is needed (no single Codex marker across surfaces; IDE inheritance can strip vars) — inherit its reasoning rather than re-deriving.
-- KTD2. **The activation engine is one canonical `references/fable-elevation.md`, byte-duplicated into each consuming skill, guarded by a parity test.** The plugin has no cross-skill import (AGENTS.md "File References in Skills"), so the file is duplicated into `ce-plan` and `ce-brainstorm` and a parity test asserts byte-equality — the same mechanism the repo already uses for the repo-profile-cache assets (`tests/repo-profile-cache-parity.test.ts`). Rejected alternative: a shared file outside either skill — breaks skill self-containment and converter portability.
+- KTD2. **The activation engine is one canonical `references/reasoning-elevation.md`, byte-duplicated into each consuming skill, guarded by a parity test.** The plugin has no cross-skill import (AGENTS.md "File References in Skills"), so the file is duplicated into `ce-plan` and `ce-brainstorm` and a parity test asserts byte-equality — the same mechanism the repo already uses for the repo-profile-cache assets (`tests/repo-profile-cache-parity.test.ts`). Rejected alternative: a shared file outside either skill — breaks skill self-containment and converter portability.
 - KTD3. **The always-loaded `SKILL.md` stub is two model-name-free lines (R14); every Fable string lives only in the gated reference.** This is what makes AE4 hold *structurally* rather than by obedience: a Codex/Cursor agent never loads a Fable instruction because the gate fails before the reference loads, and the stub itself names no model.
 - KTD4. **Elevated dispatch uses the `Agent`/`Task` `model: fable` override and passes file paths, not re-narrated prose (R15/F2).** `ce-brainstorm` already writes a grounding dossier to a scratch path; reuse it. For the decisions/transcript, the skill checkpoints a scratch file and passes its path so the Fable subagent reads full context itself.
 - KTD5. **Config reuses the existing Phase 0.0 tolerant-resolution machinery.** Three flat keys — `plan_use_fable`, `brainstorm_use_fable`, `fable_nudge` — read the same way as `plan_output`/`brainstorm_output`; commented/invalid/missing fall through to off.
@@ -192,11 +192,11 @@ The architecture is a gated-reference layering shared across the two skills. The
 ```mermaid
 flowchart TB
   subgraph SKILLMD["SKILL.md (always loaded, no Fable strings)"]
-    S1["Stub line 1: if positively Claude Code, load fable-elevation.md"]
+    S1["Stub line 1: if positively Claude Code, load reasoning-elevation.md"]
     S2["Stub line 2: unknown model request -> session model, no comment"]
   end
   G{"R6 mechanical host gate<br/>CLAUDECODE / CURSOR_AGENT / CODEX_*"}
-  subgraph REF["references/fable-elevation.md (Claude-gated, byte-duplicated)"]
+  subgraph REF["references/reasoning-elevation.md (Claude-gated, byte-duplicated)"]
     R["Resolution: intent > config > off (R7-R9,R13)"]
     D["Elevated dispatch: model=fable, file-path handoff (R15)"]
     T["Transparency R10-R12 + supersession R16"]
@@ -225,19 +225,19 @@ U1 (engine + parity test) lands first; U2/U3 wire the two skills against it; U4 
 
 ### U1. Author the Claude-gated activation engine (both copies + parity test)
 
-- **Goal:** Create the canonical `fable-elevation.md` reference that carries the entire elevation engine, and byte-duplicate it into both consuming skills under a parity guard.
+- **Goal:** Create the canonical `reasoning-elevation.md` reference that carries the entire elevation engine, and byte-duplicate it into both consuming skills under a parity guard.
 - **Requirements:** R6, R7, R8, R9, R10, R11, R12, R13, R14 (reference target), R15, R16, R17.
 - **Dependencies:** none.
 - **Files:**
-  - `skills/ce-plan/references/fable-elevation.md` (create)
-  - `skills/ce-brainstorm/references/fable-elevation.md` (create, byte-identical)
-  - `tests/fable-elevation-parity.test.ts` (create)
+  - `skills/ce-plan/references/reasoning-elevation.md` (create)
+  - `skills/ce-brainstorm/references/reasoning-elevation.md` (create, byte-identical)
+  - `tests/reasoning-elevation-parity.test.ts` (create)
 - **Approach:** The reference opens with the R6 host-gate bash snippet copied from `cross-model-review.md` Step 1 (positive-Claude-only). Then the R7–R9/R13 resolution (intent > config > off; pipeline → config-only). Then the R15 file-path handoff contract (dossier path + decisions/transcript checkpoint, no re-narration). Then R10–R12 transparency, the R16 supersession statement ("when elevation is active this overrides model-tiers.md's ceiling 'nothing is dispatched' rule for the elevated steps"), and the R17 nudge with the two canonical copy strings. The parity test globs both copies and asserts byte-equality, and registers both skills in a `CONSUMER_SKILLS` list mirroring `tests/repo-profile-cache-parity.test.ts`.
 - **Patterns to follow:** `skills/ce-code-review/references/cross-model-review.md` (gate snippet, non-blocking degradation prose); `tests/repo-profile-cache-parity.test.ts` (byte-parity assertion shape).
 - **Test scenarios:**
-  - Parity: the two `fable-elevation.md` copies are byte-identical; editing one without the other fails the test. `Covers AE4` (structural guarantee that the same gated text ships to both skills).
+  - Parity: the two `reasoning-elevation.md` copies are byte-identical; editing one without the other fails the test. `Covers AE4` (structural guarantee that the same gated text ships to both skills).
   - Parity test lists exactly the two consumer skills; adding a third copy without registering it fails.
-- **Verification:** `bun test tests/fable-elevation-parity.test.ts` passes; the reference contains no activation logic in any always-loaded file.
+- **Verification:** `bun test tests/reasoning-elevation-parity.test.ts` passes; the reference contains no activation logic in any always-loaded file.
 
 ### U2. Wire ce-plan (R1/R2 authoring dispatch)
 
@@ -316,7 +316,7 @@ U1 (engine + parity test) lands first; U2/U3 wire the two skills against it; U4 
 
 | Gate | Command / method | Applies to | Done signal |
 |---|---|---|---|
-| Parity | `bun test tests/fable-elevation-parity.test.ts` | U1 | Both `fable-elevation.md` copies byte-identical |
+| Parity | `bun test tests/reasoning-elevation-parity.test.ts` | U1 | Both `reasoning-elevation.md` copies byte-identical |
 | Full suite | `bun test` | U1, U7 | Green |
 | Release validate | `bun run release:validate` | U4, U7 | Green |
 | ce-plan elevation | `skill-creator` eval (AE1/AE3/AE5) | U2 | Pass |
@@ -332,7 +332,7 @@ No Fable string appears in any always-loaded `SKILL.md` (grep check): only the t
 ## Definition of Done
 
 - U1–U5, U7 implemented; `bun test` and `bun run release:validate` green.
-- Both `fable-elevation.md` copies byte-identical under the parity test; no Fable string outside the gated references except the two stub lines.
+- Both `reasoning-elevation.md` copies byte-identical under the parity test; no Fable string outside the gated references except the two stub lines.
 - AE1/AE2/AE3/AE5/AE6 skill-creator evals pass; AE4 inertness passes on both simulated off-Claude hosts; AE8 nudge behaves.
 - Config keys documented as Claude-Code-only; skill docs updated.
 - **Merge-blocking human gates (an autonomous run cannot clear these — surface them in the PR as unchecked):**

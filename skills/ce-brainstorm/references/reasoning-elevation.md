@@ -13,9 +13,10 @@ if [ -n "${CURSOR_AGENT:-}${CURSOR_CONVERSATION_ID:-}" ]; then HOST=cursor
 elif [ "${CLAUDECODE:-}" = "1" ]; then HOST=claude
 elif [ -n "${CODEX_SANDBOX:-}${CODEX_SESSION_ID:-}${CODEX_THREAD_ID:-}${CODEX_CI:-}" ]; then HOST=codex
 else HOST=unknown; fi
+echo "HOST: $HOST"
 ```
 
-These are **host-provided environment variables** — the Claude Code runtime sets `CLAUDECODE=1`, Cursor sets `CURSOR_AGENT` / `CURSOR_CONVERSATION_ID`, Codex sets the `CODEX_*` markers. This skill only reads them; it never sets them. You must actually **run this check with the shell tool** — the value is not knowable from context.
+These are **host-provided environment variables** — the Claude Code runtime sets `CLAUDECODE=1`, Cursor sets `CURSOR_AGENT` / `CURSOR_CONVERSATION_ID`, Codex sets the `CODEX_*` markers. This skill only reads them; it never sets them. You must actually **run this check with the shell tool** and **branch on the emitted `HOST:` line** — the `echo` is load-bearing: the variable is set inside the shell process and is gone once the command exits, so without reading the printed value you have no observable host to gate on. The value is not knowable from context.
 
 Proceed with elevation ONLY when `HOST=claude`. On `cursor`, `codex`, or `unknown`: elevation is off and inert — do not read Fable config, do not parse intent, do not dispatch, do not mention Fable. (A stray "use fable" prompt on those hosts is handled by the SKILL.md pointer without naming a model.)
 

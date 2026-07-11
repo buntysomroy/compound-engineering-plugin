@@ -83,10 +83,14 @@ def _run_checked(cmd, label):
 
 
 def _split_repo(repo):
-    """Parse an "owner/name" argument into (owner, name), or (None, None)."""
-    if repo and "/" in repo:
-        owner, name = repo.split("/", 1)
-        return owner, name
+    """Parse "[HOST/]OWNER/NAME" into (owner, name), or (None, None). A host-qualified ref (gh's
+    documented `[HOST/]OWNER/REPO` selector) drops the host — the last two segments are what the
+    GraphQL lookup needs; treating the host as the owner would query a nonexistent repo on GHE."""
+    if not repo:
+        return None, None
+    parts = repo.strip("/").split("/")
+    if len(parts) >= 2:
+        return parts[-2], parts[-1]
     return None, None
 
 
@@ -608,6 +612,10 @@ def _wake_reason(a, settle_seconds):
         return "actionable"
     if a.get("open_needs_human", 0):
         return "needs-human"         # parked items block ready; surface them
+    if a.get("has_failing_checks") and a.get("checks_terminal"):
+        # a dispatched check left terminally red (counts.ci is 0 — nothing new to dispatch) is a
+        # blocker to hand back, not a reason to idle to max-runtime.
+        return "blocked-failing"
     # merge-ready candidate: only wake once the settle window has actually elapsed, so the agent
     # is not roused every poll on a stable green PR that is merely waiting out its cooling-off.
     if (a.get("mergeable") == "MERGEABLE" and a.get("merge_state_status") == "CLEAN"

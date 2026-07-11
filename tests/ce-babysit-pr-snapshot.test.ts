@@ -344,4 +344,15 @@ describe("ce-babysit-pr pr-snapshot engine", () => {
     // same clean state with a zero settle window -> merge-ready wake
     expect(watch(path.join(dir, "w4"), cf, ["--settle-seconds", "0"]).reason).toBe("merge-ready")
   })
+
+  test("watch: a dispatched terminal-red check wakes 'blocked-failing' instead of idling to max-runtime", () => {
+    // A failing check that ce-debug marked dispatched leaves counts.ci == 0 while has_failing_checks
+    // stays true; the detector must hand that residual back, not sit idle until max-runtime.
+    const red = { ...FAILING, threads: [], checks: [{ key: "CI/test", name: "test", status: "COMPLETED", conclusion: "FAILURE", details_url: "u" }] }
+    const rf = fetchFile(dir, "wbf.json", red)
+    const sd = path.join(dir, "wbf")
+    snapshot(sd, rf) // the failing check is actionable on this first tick
+    mark(sd, ["--check", "CI/test"]) // now dispatched -> counts.ci == 0, has_failing_checks still true
+    expect(watch(sd, rf).reason).toBe("blocked-failing")
+  })
 })

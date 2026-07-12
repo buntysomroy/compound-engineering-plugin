@@ -293,6 +293,19 @@ describe("ce-babysit-pr pr-snapshot engine", () => {
     expect(d.open_needs_human).toBe(0)
   })
 
+  test("mark --comment with --acted-edit-id captures the baseline at mark time (closes the edit race)", () => {
+    const sd = path.join(dir, "cmark")
+    const fb = (edit: string) => ({
+      ...FAILING, merge_state_status: "CLEAN", review_decision: "APPROVED", checks: [], threads: [],
+      feedback: [{ id: "IC_1", kind: "comment", author: "reviewer", edit_id: edit }],
+    })
+    snapshot(sd, fetchFile(dir, "cm1.json", fb("h1")))
+    // mark dispatched with the snapshot-time edit_id (h1) as the explicit baseline (our reply never edits it)
+    mark(sd, ["--comment", "IC_1", "--disposition", "dispatched", "--acted-edit-id", "h1"])
+    // an edit that races in (h2) before the next snapshot -> reactivated, not swallowed as baseline
+    expect(snapshot(sd, fetchFile(dir, "cm2.json", fb("h2"))).counts.comments).toBe(1)
+  })
+
   test("a dispatched top-level comment reactivates when its body is edited (edit_id changes), not on our reply", () => {
     // A non-actionable wrapper marked dispatched, later edited to add an actionable request, must
     // return to actionable — our own reply is a separate top-level comment and never edits it.

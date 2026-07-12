@@ -789,10 +789,16 @@ def cmd_mark(args):
             entry["disposition"] = args.disposition
             if args.disposition == DISPOSITION_OPEN:
                 entry.pop("acted_identity", None)   # reopened -> next dispatch/park re-baselines
-            elif args.thread and args.disposition in (DISPOSITION_DISPATCHED, DISPOSITION_NEEDS_HUMAN):
-                ident = _mark_thread_baseline(item_id, args, state)
-                if ident is not None:
-                    entry["acted_identity"] = ident
+            elif args.disposition in (DISPOSITION_DISPATCHED, DISPOSITION_NEEDS_HUMAN):
+                if args.thread:
+                    # our reply moved the thread's last comment, so re-read it now as the baseline.
+                    ident = _mark_thread_baseline(item_id, args, state)
+                    if ident is not None:
+                        entry["acted_identity"] = ident
+                elif args.comment and args.acted_edit_id:
+                    # our reply is a separate top-level comment and never edits THIS one, so the
+                    # snapshot-time edit_id the agent passes is already the correct baseline (no fetch).
+                    entry["acted_identity"] = [args.acted_edit_id]
             state["last_action"] = f"{args.disposition} {label} {item_id}"
     print(json.dumps({"marked": args.check or args.thread or args.comment}))
 
@@ -819,6 +825,7 @@ def main():
     m.add_argument("--check", default=None)
     m.add_argument("--comment", default=None)
     m.add_argument("--fetch-file", default=None)  # reuse the tick's fetch for the at-mark baseline
+    m.add_argument("--acted-edit-id", default=None)  # snapshot-time edit_id baseline for a --comment
     m.set_defaults(func=cmd_mark)
 
     w = sub.add_parser("watch")

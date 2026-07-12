@@ -99,9 +99,11 @@ The snapshot emits the **actionable set** — unresolved threads you have not ye
 
 ```bash
 SKILL_DIR="<absolute path of this skill's directory>"; STATE_DIR="/tmp/compound-engineering/ce-babysit-pr/<host>-<owner>-<repo>-<N>";
-python3 "$SKILL_DIR/scripts/pr-snapshot" mark --state-dir "$STATE_DIR" --thread <ID> --disposition needs-human
-python3 "$SKILL_DIR/scripts/pr-snapshot" mark --state-dir "$STATE_DIR" --comment <ID> --disposition dispatched
+python3 "$SKILL_DIR/scripts/pr-snapshot" mark --pr <N> --repo <[host/]owner/repo> --state-dir "$STATE_DIR" --thread <ID> --disposition needs-human
+python3 "$SKILL_DIR/scripts/pr-snapshot" mark --state-dir "$STATE_DIR" --comment <ID> --disposition dispatched --acted-edit-id <edit_id-from-the-snapshot's-actionable.comments-item>
 ```
+
+Passing `--pr`/`--repo` on a **thread** mark is load-bearing: `mark` re-reads the thread's current last comment (your just-posted reply) as the reactivation baseline, so a reviewer reply that lands before the next snapshot re-opens the thread instead of being swallowed. For a **comment**, your reply is a *separate* top-level comment that never edits the original, so pass `--acted-edit-id` = that item's `edit_id` straight from this tick's snapshot (`actionable.comments[].edit_id`) — no re-read needed, and it closes the same race.
 
 These are decisions the resolver judged would change intended behavior or need a human — surface them (Step 4); do not block on them. Also retain its **non-routine verdicts** — a fix done differently than the reviewer suggested (`fixed-differently`), feedback it declined (`declined`) or rebutted as wrong (`not-addressing`) — for the Step 4 summary; a plain `fixed` is routine and not worth carrying.
 4. **Stale-SHA cancellation.** Compare the current head SHA to the one captured in step 2. If it **changed**, the comment pass (or someone) pushed — the CI failures in this snapshot are against a dead SHA, so **do not act on them**; the new run will surface next tick. If it did **not** change, continue to CI.

@@ -45,8 +45,9 @@ Gather context at **runtime** instead, as shell-neutral **argv-style commands** 
 
 **Existing-PR detection: use `gh pr list`, not `gh pr view`.**
 - `gh pr view` exits 1 when the branch has no PR — the normal pre-create state — which conflates "no PR" with a real failure.
-- `gh pr list --head <branch> --state open --json number,url,title,body,state` exits **0** and returns `[]` when there is no PR. Only an exit-0 `[]` means "no open PR." A **non-zero** exit means `gh` is missing, unauthenticated, or offline — treat PR state as **unknown**, never as "none."
+- `gh pr list --head <branch> --state open --json number,url,title,body,state,headRefName,headRepositoryOwner` exits **0** and returns `[]` when there is no PR. Only an exit-0 `[]` means "no open PR." A **non-zero** exit means `gh` is missing, unauthenticated, or offline — treat PR state as **unknown**, never as "none."
 - **`--head` gotcha:** `gh pr list --head` does **not** accept `<owner>:<branch>` syntax (confirmed on gh 2.96.0: the flag help reads `Filter by head branch ("<owner>:<branch>" syntax not supported)`). Passing `owner:branch` silently returns `[]` → a false "no PR" → a **duplicate PR**. Pass the **branch name only**. Fork PRs live on the *base* repo, so target it via `gh`'s default-repo resolution or `-R <base-owner>/<repo>`.
+- **Select the returned entry by head owner, not index 0.** Since `--head` filters by branch *name* only, a base repo with multiple forks can return several entries sharing the branch name — pick the one whose `headRepositoryOwner`/`headRefName` match the current head (which is why those fields are in the `--json`), and stop as ambiguous rather than assume the first match is yours.
 - **Empty branch (detached HEAD):** skip the PR check entirely — `gh pr list` with an empty `--head` drops the filter and lists *unrelated* PRs.
 
 **Demote every gathered value to a stale hint.** Context gathered up front is a snapshot; re-verify immediately before any consequential action: re-read the current branch before `git push`, and **always** re-run the existing-PR check before `gh pr create` (not only when the first check came back unknown), since a PR can appear between gather and create.
@@ -91,7 +92,7 @@ Use the repo root gathered in Context (resolving it with
 | `git rev-parse --show-toplevel` | Repo root | Not a git repository — report and stop |
 | `git branch --show-current`     | Current branch | Empty = detached HEAD |
 | `git rev-parse --abbrev-ref origin/HEAD` | Remote default | No origin/HEAD set — resolve per Step 1 |
-| `gh pr list --head <branch> --state open --json number,url,title,body,state`
+| `gh pr list --head <branch> --state open --json number,url,title,body,state,headRefName,headRepositoryOwner`
     | Open PR for this branch | Exit 0 with `[]` = no open PR; non-zero = unknown, never "no PR" |
 ```
 
@@ -103,8 +104,9 @@ with the load-bearing instruction above it: *"run each command below as its **ow
 # Before — exits 1 when the branch has no PR (the normal pre-create state)
 gh pr view
 
-# After — exits 0, returns [] when there is no PR; branch name only (no owner:branch)
-gh pr list --head <branch> --state open --json number,url,title,body,state
+# After — exits 0, returns [] when there is no PR; branch name only (no owner:branch);
+# select the entry by head owner, not index 0
+gh pr list --head <branch> --state open --json number,url,title,body,state,headRefName,headRepositoryOwner
 ```
 
 **Test enforcement.** `tests/skill-shell-safety.test.ts` was rewritten from per-pattern "bare-form" checks into (a) a **total ban** on `` !`cmd` `` in any skill file, (b) a per-command **load-abort catalog** naming each historical command and the state that would abort load, and (c) an **argv-only regression guard** on the two commit skills' `## Context` sections — no fenced shell block, no compound operators — so a POSIX-only runtime gather can't quietly reintroduce the #1066 break at runtime. `AGENTS.md` was updated to stop recommending `!` pre-resolution and document the runtime-gather pattern. `bun test` → 1930 pass, 0 fail; a Grok cross-model review (SHIP-WITH-FIXES) caught the `--head owner:branch` bug and 6 other findings, all applied.

@@ -253,7 +253,7 @@ query($owner:String!,$repo:String!,$pr:Int!,$cursor:String){
   repository(owner:$owner,name:$repo){ pullRequest(number:$pr){
     reviewThreads(first:100,after:$cursor){
       nodes{ id isResolved path line
-        comments(last:1){ nodes{ id createdAt lastEditedAt } } }
+        comments(last:100){ nodes{ id createdAt lastEditedAt } } }
       pageInfo{ hasNextPage endCursor } } } } }"""
     out = []
     cursor = None
@@ -269,10 +269,16 @@ query($owner:String!,$repo:String!,$pr:Int!,$cursor:String){
                 continue
             cs = n.get("comments", {}).get("nodes") or []
             last = cs[-1] if cs else {}
+            # `last_comment_at` is the reactivation signal — the MAX edit/create time across every
+            # comment in the thread, not just the last one, so a reviewer editing an *earlier* comment
+            # (their original request) after the agent's reply still moves the identity and re-opens it.
+            # Bounded to the last 100 comments (see the query): review threads are ~never that long; an
+            # edit to a comment outside that window would be missed (acceptable vs paginating per thread).
+            edit_at = max((c.get("lastEditedAt") or c.get("createdAt") or "" for c in cs), default="")
             out.append({
                 "thread_id": n["id"],
                 "last_comment_id": last.get("id"),
-                "last_comment_at": last.get("lastEditedAt") or last.get("createdAt"),
+                "last_comment_at": edit_at or last.get("lastEditedAt") or last.get("createdAt"),
                 "path": n.get("path"),
                 "line": n.get("line"),
             })
@@ -305,6 +311,8 @@ def _empty_trajectory():
         "problem_keys": [],            # last tick's failing checks + non-parked threads (progress detection)
         "min_open_problems": None,     # lowest total open-problem count seen
         "heads_since_progress": 0,     # head changes since progress (a new low OR something cleared)
+        "last_head": None,             # head as of the last AGENT tick — hsp counts moves between ticks,
+                                       # NOT poll-observed head moves (state["head_sha"] advances on polls)
     }
 
 
@@ -348,7 +356,32 @@ def _trend(series):
     return "flat"
 
 
-def _update_trajectory(state, head, head_changed, new_checks, new_threads, new_feedback, actionable):
+def _record_check_history(state, head, new_checks):
+    """Record CI fail->clear->fail recurrence transitions. Runs on EVERY snapshot — agent ticks AND
+    watch polls — so a CLEAR (or FAIL) observed only between agent ticks is not lost, which would
+    otherwise make the ping-pong recurrence trigger under-fire under the self-sustaining watch.
+    Idempotent per transition: once a check is FAILING, re-observing FAIL does not re-increment."""
+    tj = _load_trajectory(state)
+    tick = state.get("tick", 0)
+    hist = tj["check_history"]
+    for key, c in new_checks.items():
+        h = hist.setdefault(key, {"state": CHECK_UNKNOWN, "last_head": None, "recur": 0, "seen_tick": tick})
+        h["seen_tick"] = tick
+        if c["conclusion"] in FAILING:
+            if h["state"] == CHECK_CLEAR and h["last_head"] != head:  # fail after a clear on a new head
+                h["recur"] += 1
+            h["state"] = CHECK_FAILING
+            h["last_head"] = head
+        elif c["status"] == "COMPLETED":  # observed non-failing terminal — a genuine clear
+            h["state"] = CHECK_CLEAR
+            h["last_head"] = head
+        # IN_PROGRESS/QUEUED: leave prior state untouched (not yet a clear)
+    # Evict entries unseen for TTL agent-ticks (polls don't advance the tick) — bounds growth without
+    # erasing a check that was briefly absent (a one-tick gap must not lose real recurrence history).
+    tj["check_history"] = {k: v for k, v in hist.items() if tick - v.get("seen_tick", tick) <= CHECK_HISTORY_TTL}
+
+
+def _update_trajectory(state, head, new_checks, new_threads, new_feedback, actionable):
     """Maintain and emit the deterministic trajectory. Coarse by design: check-name-level
     recurrence, backlog trend, cross-stream alternation, no-progress heads. Fine, invariant-
     level judgment (log signatures, nit root-clustering) is the leaf's job, not this script's.
@@ -356,31 +389,14 @@ def _update_trajectory(state, head, head_changed, new_checks, new_threads, new_f
     (top-level comments + review bodies) counts as review-stream activity and as an open problem
     for the stall signal, but the thread-named backlog fields stay scoped to inline threads."""
     tj = _load_trajectory(state)
-    tick = state.get("tick", 0)
 
-    # --- CI recurrence: a check that FAILED, was later observed CLEARED, then FAILS again
-    # on a *different* head. Same-head flapping is excluded (that is flaky, not ping-pong). ---
+    # --- CI recurrence (fail->clear->fail on a *different* head): recorded on EVERY observation
+    # (agent ticks AND watch polls, via _record_check_history in diff) so a clear seen only between
+    # agent ticks is not lost. Here we just READ the accumulated history for the trigger. recur_max
+    # reflects only checks present this tick, so a stale key can't keep it elevated. ---
     hist = tj["check_history"]
-    recurring = []
-    for key, c in new_checks.items():
-        failing = c["conclusion"] in FAILING
-        h = hist.setdefault(key, {"state": CHECK_UNKNOWN, "last_head": None, "recur": 0, "seen_tick": tick})
-        h["seen_tick"] = tick
-        if failing:
-            if h["state"] == CHECK_CLEAR and h["last_head"] != head:
-                h["recur"] += 1
-                recurring.append({"key": key, "recur": h["recur"]})
-            h["state"] = CHECK_FAILING
-            h["last_head"] = head
-        elif c["status"] == "COMPLETED":  # observed non-failing terminal — a genuine clear
-            h["state"] = CHECK_CLEAR
-            h["last_head"] = head
-        # IN_PROGRESS/QUEUED: leave prior state untouched (not yet a clear)
-    # Evict only entries unseen for TTL ticks — bounds growth without erasing a check that was
-    # briefly absent (a one-tick gap must not lose real fail->clear->fail recurrence history).
-    tj["check_history"] = hist = {k: v for k, v in hist.items() if tick - v.get("seen_tick", tick) <= CHECK_HISTORY_TTL}
-    # recur_max reflects only checks present this tick, so a stale key can't keep it elevated.
     recur_max = max((hist[k]["recur"] for k in new_checks if k in hist), default=0)
+    recurring = [{"key": k, "recur": hist[k]["recur"]} for k in new_checks if k in hist and hist[k]["recur"] > 0]
 
     # --- Review-thread backlog: trend of unresolved-thread count + genuinely new threads this
     # tick. Scoped to inline threads (non-thread feedback is captured in the total-problem stall
@@ -420,11 +436,16 @@ def _update_trajectory(state, head, head_changed, new_checks, new_threads, new_f
     new_low = minp is None or open_problems < minp
     if new_low:
         tj["min_open_problems"] = open_problems
+    # heads_since_progress counts head moves BETWEEN AGENT TICKS (tj["last_head"]), not poll-observed
+    # moves — a watch poll advances state["head_sha"], so a plain head_changed would read False at the
+    # agent's tick and starve this stall signal under the default self-sustaining watch.
+    traj_head_moved = tj.get("last_head") is not None and head != tj.get("last_head")
     if new_low or cleared_something:
         tj["heads_since_progress"] = 0
-    elif head_changed:
+    elif traj_head_moved:
         tj["heads_since_progress"] = tj.get("heads_since_progress", 0) + 1
     tj["problem_keys"] = sorted(problem_keys)
+    tj["last_head"] = head
 
     return {
         "recurring_checks": recurring,
@@ -567,13 +588,19 @@ def diff(state, cur, now=None, advance_trajectory=True):
     actionable = {"ci": actionable_ci, "threads": actionable_threads, "comments": actionable_feedback}
     if advance_trajectory:
         state["tick"] = state.get("tick", 0) + 1
-        trajectory = _update_trajectory(state, head, head_changed, new_checks, new_threads, new_feedback, actionable)
+    # Record CI recurrence transitions on EVERY observation (polls too) so a fail->clear->fail seen
+    # only between agent ticks is not lost. head_sha for the check-level last_head is the observed
+    # head; the trajectory-level last_head (for heads_since_progress) is agent-tick-only, inside
+    # _update_trajectory.
+    _record_check_history(state, head, new_checks)
+    if advance_trajectory:
+        trajectory = _update_trajectory(state, head, new_checks, new_threads, new_feedback, actionable)
     else:
-        # A watch poll detects change and advances the settle clock, but must NOT advance trajectory
-        # bookkeeping (tick counter, seen_threads, unresolved_series, check_history). Advancing it
-        # would consume new_threads_this_tick — the waking poll marks the just-arrived thread "seen",
-        # so the agent's real tick reads 0 new arrivals and the review-bot-treadmill non-convergence
-        # trigger never fires. Only the agent's tick (advance_trajectory=True) rolls the trajectory.
+        # A watch poll detects change and advances the settle clock, but must NOT roll the rest of the
+        # trajectory (tick counter, seen_threads, unresolved_series, heads_since_progress). Advancing
+        # it would consume new_threads_this_tick — the waking poll marks the just-arrived thread
+        # "seen", so the agent's real tick reads 0 new arrivals and the review-bot-treadmill
+        # non-convergence trigger never fires. Only the agent's tick (advance_trajectory=True) rolls it.
         trajectory = {}
 
     # --- Settle window: any observable movement resets the quiet clock. ---

@@ -305,6 +305,25 @@ describe("ce-babysit-pr pr-snapshot engine", () => {
     expect(snapshot(sd, fetchFile(dir, "tw3.json", withThread)).trajectory.new_threads_this_tick).toBe(1)
   }, 15000)
 
+  test("heads_since_progress counts head moves across AGENT ticks even when a poll observed the new head first (C2)", () => {
+    const sd = path.join(dir, "hspwatch")
+    const failAt = (head: string) => ({ ...FAILING, head_sha: head, threads: [], checks: [{ key: "CI/x", name: "x", status: "COMPLETED", conclusion: "FAILURE", details_url: "u" }] })
+    snapshot(sd, fetchFile(dir, "hw1.json", failAt("s1"))) // agent tick: persistent failure at head s1
+    watch(sd, fetchFile(dir, "hw2.json", failAt("s2"))) // a poll observes+persists head s2 (no trajectory roll)
+    const d = snapshot(sd, fetchFile(dir, "hw3.json", failAt("s2"))) // agent tick at s2
+    expect(d.trajectory.heads_since_progress).toBe(1) // head moved s1->s2 between agent ticks; not starved by the poll
+  }, 15000)
+
+  test("check recurrence catches a CLEAR observed only on a watch poll (C1)", () => {
+    const sd = path.join(dir, "recurwatch")
+    const RED = { key: "CI/x", name: "x", status: "COMPLETED", conclusion: "FAILURE", details_url: "u" }
+    const GREEN = { key: "CI/x", name: "x", status: "COMPLETED", conclusion: "SUCCESS", details_url: "u" }
+    snapshot(sd, fetchFile(dir, "rw1.json", { ...FAILING, head_sha: "s1", threads: [], checks: [RED] })) // fail h1
+    watch(sd, fetchFile(dir, "rw2.json", { ...FAILING, head_sha: "s2", threads: [], checks: [GREEN] })) // a poll observes the CLEAR
+    const d = snapshot(sd, fetchFile(dir, "rw3.json", { ...FAILING, head_sha: "s3", threads: [], checks: [RED] })) // fail h3
+    expect(d.trajectory.check_recur_max).toBe(1) // fail -> clear(seen only on a poll) -> fail = recurrence
+  }, 15000)
+
   test("--reset-session restarts the budget clock so a resumed watch is not instantly over-budget", () => {
     const sd = path.join(dir, "sess")
     snapshot(sd, fetchFile(dir, "se1.json", FAILING)) // creates state with started_at = now
@@ -356,6 +375,20 @@ describe("ce-babysit-pr pr-snapshot engine", () => {
     mark(sd, ["--comment", "IC_1", "--disposition", "dispatched", "--acted-edit-id", "h1"])
     // an edit that races in (h2) before the next snapshot -> reactivated, not swallowed as baseline
     expect(snapshot(sd, fetchFile(dir, "cm2.json", fb("h2"))).counts.comments).toBe(1)
+  })
+
+  test("a dispatched thread reactivates when an EARLIER comment is edited (same last_comment_id, bumped last_comment_at)", () => {
+    // fetch_threads sets last_comment_at = max edit/create time across the whole thread, so an edit
+    // to an earlier comment (last_comment_id unchanged) still moves the identity and reopens it.
+    const sd = path.join(dir, "editearlier")
+    const thr = (at: string) => ({
+      ...FAILING, checks: [], threads: [{ thread_id: "T1", last_comment_id: "R1", last_comment_at: at }],
+    })
+    snapshot(sd, fetchFile(dir, "ee1.json", thr("t1")))
+    mark(sd, ["--thread", "T1", "--disposition", "dispatched"]) // lazy baseline
+    expect(snapshot(sd, fetchFile(dir, "ee2.json", thr("t1"))).counts.threads).toBe(0) // baseline (R1,t1) -> silenced
+    // reviewer edits an earlier comment: last_comment_id stays R1 but the thread's max edit time bumps
+    expect(snapshot(sd, fetchFile(dir, "ee3.json", thr("t2"))).counts.threads).toBe(1) // reactivated
   })
 
   test("a dispatched top-level comment reactivates when its body is edited (edit_id changes), not on our reply", () => {

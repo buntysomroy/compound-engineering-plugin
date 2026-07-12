@@ -104,13 +104,13 @@ This avoids conflating "no upstream configured yet" with "nothing to push."
 For "does this branch already have a PR?" use a command that separates "no PR" from "lookup failed":
 
 ```bash
-gh pr list --head <branch> --state open --json number,url,title,body,state
+gh pr list --head <branch> --state open --json number,url,title,body,state,headRefName,headRepositoryOwner
 ```
 
 Interpret the result as a state check:
 
 - Exit 0 with `[]` -> no open PR for this branch (proceed to creation)
-- Exit 0 with entries -> a PR exists; use the first entry's URL
+- Exit 0 with entries -> a PR exists; pick the entry whose `headRepositoryOwner`/`headRefName` match the current head, not index 0. If several entries share the branch name from different owners and none is confirmably yours, treat it as ambiguous and stop rather than act on someone else's PR
 - Non-zero exit -> `gh` is missing, unauthenticated, or offline: PR state is **unknown**, never "no PR". Resolve auth/connectivity before creating, so a lookup failure cannot cause a duplicate PR.
 
 Pass the branch **name only** — `gh pr list --head` does not accept `<owner>:<branch>` syntax (it silently returns `[]` for it, which reads as "no PR" and opens a duplicate). On a fork checkout the PR lives on the base repo, so target the base via `gh`'s default-repo resolution or `-R <base-owner>/<repo>`. Skip this check entirely on detached HEAD (empty branch): `gh pr list` with an empty `--head` drops the filter and lists unrelated PRs.

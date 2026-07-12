@@ -480,7 +480,7 @@ def _apply_dispositions(items, id_key, prior, identity_fn=None):
     return persisted, actionable, needs_human
 
 
-def diff(state, cur, now=None):
+def diff(state, cur, now=None, advance_trajectory=True):
     """Pure: given prior state + current snapshot, compute the actionable set
     and the persisted observed state. `now` is injectable for tests."""
     now = now or _now()
@@ -563,10 +563,18 @@ def diff(state, cur, now=None):
     state["merge_state_status"] = cur["merge_state_status"]
     state["review_in_progress"] = cur.get("review_in_progress", False)
     state["awaiting_approval"] = cur.get("awaiting_approval", 0)
-    state["tick"] = state.get("tick", 0) + 1
 
     actionable = {"ci": actionable_ci, "threads": actionable_threads, "comments": actionable_feedback}
-    trajectory = _update_trajectory(state, head, head_changed, new_checks, new_threads, new_feedback, actionable)
+    if advance_trajectory:
+        state["tick"] = state.get("tick", 0) + 1
+        trajectory = _update_trajectory(state, head, head_changed, new_checks, new_threads, new_feedback, actionable)
+    else:
+        # A watch poll detects change and advances the settle clock, but must NOT advance trajectory
+        # bookkeeping (tick counter, seen_threads, unresolved_series, check_history). Advancing it
+        # would consume new_threads_this_tick — the waking poll marks the just-arrived thread "seen",
+        # so the agent's real tick reads 0 new arrivals and the review-bot-treadmill non-convergence
+        # trigger never fires. Only the agent's tick (advance_trajectory=True) rolls the trajectory.
+        trajectory = {}
 
     # --- Settle window: any observable movement resets the quiet clock. ---
     changed_this_tick = head_changed or _change_sig(state) != prior_change_sig or state.get("last_change_at") is None
@@ -656,7 +664,7 @@ def locked_state(state_dir, pr, repo, now):
         fcntl.flock(lf, fcntl.LOCK_UN)
 
 
-def _run_snapshot(args, now):
+def _run_snapshot(args, now, advance_trajectory=True):
     """One fetch -> diff -> persist. Returns the actionable/state dict."""
     if args.fetch_file:
         with open(args.fetch_file) as f:
@@ -671,7 +679,7 @@ def _run_snapshot(args, now):
             # this, `started_at` persists from state creation, so resuming against day-old state would
             # read session_seconds as huge and hand back as "budget exhausted" before doing any work.
             box["state"]["started_at"] = _iso(now)
-        actionable, box["state"] = diff(box["state"], cur, now)
+        actionable, box["state"] = diff(box["state"], cur, now, advance_trajectory=advance_trajectory)
     return actionable
 
 
@@ -752,7 +760,7 @@ def cmd_watch(args):
         if args.stop_file and os.path.exists(args.stop_file):
             _emit_wake("stop-signal")
             return
-        actionable = _run_snapshot(args, _now())
+        actionable = _run_snapshot(args, _now(), advance_trajectory=False)  # a poll must not roll the trajectory
         args.reset_session = False   # ...but later polls are ticks of that same session, not new ones
         if armed is None:
             armed = _blocker_sig(actionable)

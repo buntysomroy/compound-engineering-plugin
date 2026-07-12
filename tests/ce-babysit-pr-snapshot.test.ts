@@ -292,6 +292,19 @@ describe("ce-babysit-pr pr-snapshot engine", () => {
     expect(d.trajectory.heads_since_progress).toBe(0)
   })
 
+  test("a watch poll does not consume new_threads_this_tick — the agent's tick still sees the new arrival", () => {
+    // The watch's waking poll persists change-detection state but must NOT roll the trajectory, or it
+    // marks the just-arrived thread "seen" and the agent's real tick reads 0 new arrivals — hiding a
+    // review-bot treadmill from the non-convergence trigger.
+    const sd = path.join(dir, "trajwatch")
+    const noThreads = { ...FAILING, checks: [], threads: [] }
+    snapshot(sd, fetchFile(dir, "tw1.json", noThreads)) // agent tick: baseline, no threads
+    const withThread = { ...FAILING, checks: [], threads: [{ thread_id: "T1", last_comment_id: "C1", last_comment_at: "C1" }] }
+    expect(watch(sd, fetchFile(dir, "tw2.json", withThread)).reason).toBe("actionable") // a poll wakes on the new thread
+    // the agent's real tick then still counts T1 as newly arrived (the poll didn't mark it seen)
+    expect(snapshot(sd, fetchFile(dir, "tw3.json", withThread)).trajectory.new_threads_this_tick).toBe(1)
+  }, 15000)
+
   test("--reset-session restarts the budget clock so a resumed watch is not instantly over-budget", () => {
     const sd = path.join(dir, "sess")
     snapshot(sd, fetchFile(dir, "se1.json", FAILING)) // creates state with started_at = now

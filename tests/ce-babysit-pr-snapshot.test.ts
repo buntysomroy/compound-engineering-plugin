@@ -279,6 +279,28 @@ describe("ce-babysit-pr pr-snapshot engine", () => {
     expect(snapshot(path.join(dir, "be2"), fetchFile(dir, "be2.json", terminal)).blocked_external).toBe(true)
   })
 
+  test("a dispatched (handled) top-level comment does not inflate heads_since_progress across heads", () => {
+    // A handled comment never drops out of the fetch, so counting it as an open problem would keep
+    // heads_since_progress climbing forever and falsely trip non-convergence on unrelated later work.
+    const sd = path.join(dir, "stall")
+    const fb = (head: string) => ({
+      ...FAILING, head_sha: head, checks: [], threads: [], feedback: [{ id: "IC_1", kind: "comment", author: "r", edit_id: "h" }],
+    })
+    snapshot(sd, fetchFile(dir, "st1.json", fb("s1"))) // IC_1 open -> a problem
+    mark(sd, ["--comment", "IC_1", "--disposition", "dispatched", "--acted-edit-id", "h"])
+    const d = snapshot(sd, fetchFile(dir, "st2.json", fb("s2"))) // dispatched + head moved -> handled, progress
+    expect(d.trajectory.heads_since_progress).toBe(0)
+  })
+
+  test("clearing a fork approval gate is movement (resets the settle clock so merge-ready waits for check-runs)", () => {
+    const sd = path.join(dir, "appr")
+    const gated = { ...FAILING, merge_state_status: "CLEAN", review_decision: "APPROVED", checks: [], threads: [], awaiting_approval: 1 }
+    snapshot(sd, fetchFile(dir, "ap1.json", gated)) // first tick
+    expect(snapshot(sd, fetchFile(dir, "ap2.json", gated)).changed_this_tick).toBe(false) // stable gate, no movement
+    // approval clears (no check-runs created yet) -> registered as movement so quiet resets
+    expect(snapshot(sd, fetchFile(dir, "ap3.json", { ...gated, awaiting_approval: 0 })).changed_this_tick).toBe(true)
+  })
+
   test("mark --thread captures the acted baseline at mark time (closes the reviewer-reply race)", () => {
     const sd = path.join(dir, "atmark")
     const thr = (cid: string) => ({

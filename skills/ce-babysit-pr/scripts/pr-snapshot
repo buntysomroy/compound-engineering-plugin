@@ -408,9 +408,12 @@ def _update_trajectory(state, head, head_changed, new_checks, new_threads, new_f
     # actionable and would fake progress. Reset the counter when the head moves and either the
     # total set a new low OR a previously-failing item cleared: progressive migration (A cleared
     # while B appears) is progress, not a stall, so it must not accrue heads_since_progress. ---
+    # Only genuinely-OPEN items are unresolved work: a `dispatched` item is handled (a top-level
+    # comment never drops out of the fetch, so counting it would keep heads_since_progress climbing
+    # forever and falsely trip non-convergence on unrelated later work), and `needs-human` is parked.
     problem_keys = {f"c:{k}" for k, c in new_checks.items() if c["conclusion"] in FAILING}
-    problem_keys |= {f"t:{tid}" for tid, t in new_threads.items() if t.get("disposition") != DISPOSITION_NEEDS_HUMAN}
-    problem_keys |= {f"m:{fid}" for fid, f in new_feedback.items() if f.get("disposition") != DISPOSITION_NEEDS_HUMAN}
+    problem_keys |= {f"t:{tid}" for tid, t in new_threads.items() if t.get("disposition") == DISPOSITION_OPEN}
+    problem_keys |= {f"m:{fid}" for fid, f in new_feedback.items() if f.get("disposition") == DISPOSITION_OPEN}
     cleared_something = bool(set(tj.get("problem_keys", [])) - problem_keys)
     open_problems = len(problem_keys)
     minp = tj.get("min_open_problems")
@@ -559,6 +562,7 @@ def diff(state, cur, now=None):
     state["mergeable"] = cur["mergeable"]
     state["merge_state_status"] = cur["merge_state_status"]
     state["review_in_progress"] = cur.get("review_in_progress", False)
+    state["awaiting_approval"] = cur.get("awaiting_approval", 0)
     state["tick"] = state.get("tick", 0) + 1
 
     actionable = {"ci": actionable_ci, "threads": actionable_threads, "comments": actionable_feedback}
@@ -574,7 +578,7 @@ def diff(state, cur, now=None):
     # invisible to the rollup above — surface them, and never call CI "ok" while the real CI is
     # gated. blocked_external = the loop cannot progress (no failing check to fix, but CI can't run)
     # and no one in this loop can unblock it — it is up to a maintainer of the base repo.
-    awaiting_approval = cur.get("awaiting_approval", 0)
+    awaiting_approval = state["awaiting_approval"]
     # "OK" requires every check terminal, none failing, AND none gated on approval. A still-
     # IN_PROGRESS or awaiting-approval check is neither ok nor failing — do not exit green.
     all_checks_ok = checks_terminal and not has_failing and bool(cur["checks"]) and awaiting_approval == 0
@@ -614,8 +618,11 @@ def _change_sig(state):
     checks = {k: (v.get("status"), v.get("conclusion")) for k, v in state.get("checks", {}).items()}
     threads = {tid: _thread_identity(v) for tid, v in state.get("threads", {}).items()}
     feedback = {fid: v.get("disposition") for fid, v in state.get("feedback", {}).items()}
-    return (checks, threads, feedback, state.get("review_decision"),
-            state.get("mergeable"), state.get("merge_state_status"), state.get("review_in_progress"))
+    return (checks, threads, feedback, state.get("review_decision"), state.get("mergeable"),
+            state.get("merge_state_status"), state.get("review_in_progress"),
+            # awaiting-approval clearing is movement: a fork gate lifting must reset the settle clock
+            # so merge-ready waits for the now-imminent check-runs instead of firing on an empty rollup.
+            bool(state.get("awaiting_approval")))
 
 
 def _elapsed(iso_str, now):
@@ -717,6 +724,12 @@ def _blocker_sig(a):
         sig.add("__terminal_red__")
     if a.get("blocked_external"):
         sig.add("__blocked_external__")
+    # A new head is "context materially changed": a human may have pushed a commit that answers or
+    # supersedes a parked residual, so the head is part of the baseline — when it moves, the residual
+    # is no longer "already-surfaced against this state" and the watch wakes to give the agent a tick
+    # to reopen/reprocess it, instead of parking forever while it still blocks merge-ready.
+    if sig:
+        sig.add(("head", a.get("head_sha")))
     return frozenset(sig)
 
 

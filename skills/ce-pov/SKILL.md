@@ -8,7 +8,7 @@ argument-hint: "[the external thing to judge, plus any links] — or invoke bare
 
 Return a decisive, **graded verdict** on something from the outside world — judged against *this project*, not in the abstract.
 
-The subject of this point of view — the thing to judge — is whatever the user asked about when invoking this skill; read it from their request in the current conversation.
+The subject of this point of view — the thing to judge — is the input this skill was invoked with, present in the current prompt or conversation (whether the user asked directly or a calling skill passed it).
 
 **Note: The current year is 2026.** Use this when weighting source recency and dating any captured record.
 

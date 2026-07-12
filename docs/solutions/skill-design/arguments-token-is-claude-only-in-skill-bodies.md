@@ -42,7 +42,12 @@ Separate the two uses — they take different fixes:
 - **Reasoning / flag detection** ("scan `$ARGUMENTS` for `output:`/`mode:`"). The agent does not need the token here — the user's request is already in its context on every harness. Phrase it harness-neutrally: **reason over the user's prompt** for the intent, honoring both the shorthand token (`output:html`) and plain language ("make this a webpage"). Add the discriminating guard: a format/flag named as **subject matter** ("add an HTML export feature", "plan the CSV importer") is the work, not a flag — do not act on it.
 - **Input injection** (`<feature_description> #$ARGUMENTS </feature_description>`). On Claude this is *how* the description reaches the agent inline, but the token is not actually necessary — the user's request is redundantly present in the agent's context on every harness (Claude Code invokes a skill via the Skill tool, so the user's turn stays in the transcript; the OpenCode converter injects args through its own command stub; Codex/Gemini/Cursor load the skill mid-conversation). Two tiers of fix, in increasing cleanliness:
   - *Minimal (graceful degradation):* keep the token but pair it with a fallback — *"if this shows a literal `$ARGUMENTS`, the harness did not substitute it — use the user's actual request from the conversation."* Mirrors the pre-resolution-with-fallback pattern AGENTS.md prescribes for `${CLAUDE_PLUGIN_ROOT}`. Fixes the failure but leaves the Claude-only token in place with prose wrapped around it.
-  - *Preferred (remove the token entirely):* replace the slot with a prose binding that reads the input from the conversation — e.g. "the **feature description** is whatever the user asked to plan when invoking this skill; read it from their request in the current conversation." This removes the "was it substituted?" question by construction instead of papering over it. Two things must be preserved when you do this: (1) any **named reference** downstream logic depends on — several skills use the injection tag as a *variable* elsewhere (`<input_document>`, `<bug_description>`, `{focus_hint}`), so define the name in the prose ("the rest of this skill refers to it as `<input_document>`") rather than orphaning those references; and (2) each skill's existing **empty/clarify handling** — route a missing input into the skill's own "ask the user" / "proceed open-ended" path rather than adding a competing one. This was applied to every injection-slot skill in #1110 (open as of this writing).
+  - *Preferred (remove the token entirely):* replace the slot with a prose binding that reads the input from the invocation — e.g. "the **feature description** is the input this skill was invoked with, present in the current prompt or conversation." This removes the "was it substituted?" question by construction instead of papering over it. Three things must be preserved when you do this:
+    1. **Named references.** Several skills use the injection tag as a *variable* elsewhere (`<input_document>`, `<bug_description>`, `{focus_hint}`), so define the name in the prose ("the rest of this skill refers to it as `<input_document>`") rather than orphaning those references.
+    2. **Empty/clarify handling.** Route a missing input into the skill's own "ask the user" / "proceed open-ended" path rather than adding a competing one.
+    3. **Caller-neutral semantics — the subtle one.** `$ARGUMENTS` is *whatever the skill was invoked with*, by **any** caller. Bind the input to "the input this skill was invoked with," **not** "the user's request" — because a skill is often invoked by *another skill* in `mode:pipeline` (e.g. `ce-babysit-pr` calls `ce-debug` passing failing jobs and log tails as the argument; `lfg` calls `ce-plan`/`ce-work` with a payload). A binding that says "read the user's request" makes a pipeline-delegated skill ignore the caller's payload and parse an empty input, silently breaking the autonomous path. This was caught in review on `ce-debug`'s binding: the first-pass rewrite narrowed the input to "the user," and the fix was to phrase it as the invocation input from the user *or* a calling skill. The prose-logic phrasing "the arguments you were invoked with" was already caller-neutral; only the injection-slot bindings needed this widening.
+
+  This was applied to every injection-slot skill in #1110 (open as of this writing).
 
 ## Why This Matters
 
@@ -90,10 +95,11 @@ Preferred (remove the token; bind the input in prose, preserving the named
 reference downstream logic uses):
 
 ```text
-The input document for this run is whatever the user provided when invoking
-this skill — read it from their request in the current conversation. The rest
-of this skill refers to it as <input_document>; if the user provided nothing,
-treat <input_document> as blank.
+The input document for this run is the input this skill was invoked with —
+present in the current prompt or conversation, whether the user provided it
+directly or a calling skill passed it (e.g. in mode:pipeline). The rest of this
+skill refers to it as <input_document>; if nothing was provided, treat
+<input_document> as blank.
 ```
 
 **Status / scope note (updated 2026-07-12):** both items the original capture deferred are now done, and the fix landed cleaner than the deferred plan.

@@ -44,9 +44,9 @@ Sub-agent dispatch is tiered by task shape, never hardcoded to a model name. Whe
 
 ## Feature Description
 
-The **feature description** is whatever the user asked to explore when invoking this skill — read it from their request in the current conversation.
+The **feature description** is the input this skill was invoked with — what to explore, present in the current prompt or conversation, whether the user provided it directly or a calling skill passed it.
 
-**If the user gave no feature description, ask the user:** "What would you like to explore? Please describe the feature, problem, or improvement you're thinking about."
+**If no feature description was provided, ask the user:** "What would you like to explore? Please describe the feature, problem, or improvement you're thinking about."
 
 Do not proceed until you have a feature description from the user.
 

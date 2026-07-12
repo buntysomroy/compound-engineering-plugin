@@ -8,7 +8,7 @@ argument-hint: "[a concept, a diff ref, an idea, or 'what happened this week?'] 
 
 Teach the user one thing well: a concept, a change, an idea, or a window of their own recent work. Agent-driven development removed the learning that writing code by hand used to provide; this skill is the replacement — the human keeps learning while agents do the writing.
 
-What to explain is whatever the user asked about when invoking this skill; read it from their request in the current conversation.
+What to explain is the input this skill was invoked with, present in the current prompt or conversation (whether the user asked directly or a calling skill passed it).
 
 **Note: The current year is 2026.** Use this when weighting external sources and dating artifacts.
 

@@ -145,7 +145,7 @@ reap() {
 run_codex() {
   local prev; case "$-" in *m*) prev=1;; *) prev=0;; esac
   set -m
-  command codex exec - -C "$RUN_DIR" -s read-only -o "$OUT" -m "$CODEX_MODEL" \
+  command codex exec - -C "$RUN_DIR" --skip-git-repo-check -s read-only -o "$OUT" -m "$CODEX_MODEL" \
     -c "model_reasoning_effort=\"$CODEX_EFFORT\"" -c 'hide_agent_reasoning=false' \
     < "$PROMPT_FILE" > "$PEERLOG" 2>&1 &
   local pid=$!

@@ -202,24 +202,8 @@ def root_sha() -> "str | None":
     return sorted(out.split("\n"))[0]
 
 
-def inputs_digest() -> "str | None":
-    """Sha256 covering committed tree shape + profile-input contents at HEAD.
-
-    Two layers (committed state only via `git ls-tree`; working-tree dirtiness
-    is a separate HIT gate via `changed_paths`):
-
-    - Every blob **path** (no content) — so adding/removing/renaming a file
-      (e.g. a new `src/db/migrations/` module) changes the digest and busts a
-      cached topology/module_layout, without invalidating on content edits to
-      existing non-input files.
-    - `(path, blob-sha)` for every **profile-input** blob — so manifest/docs/CI
-      content changes still invalidate.
-    - `(path, commit-sha)` for every **gitlink** (`160000 commit` submodule
-      entry) — so adding a submodule or advancing its pointer invalidates;
-      blob-only filtering would drop these before their path is recorded.
-
-    None if git could not list the tree.
-    """
+def _parse_ls_tree() -> "list[tuple[str, str, str, str]] | None":
+    """Parse `git ls-tree -r -z HEAD` into (mode, obj_type, obj, path) rows."""
     try:
         result = subprocess.run(
             ["git", "ls-tree", "-r", "-z", "HEAD"],
@@ -231,7 +215,7 @@ def inputs_digest() -> "str | None":
     if result.returncode != 0:
         return None
 
-    pairs: list[str] = []
+    rows: list[tuple[str, str, str, str]] = []
     for entry in result.stdout.split(b"\0"):
         if not entry:
             continue
@@ -242,16 +226,117 @@ def inputs_digest() -> "str | None":
         parts = meta.split()
         if len(parts) < 3:
             continue
-        obj_type, obj = parts[1], parts[2]
+        mode, obj_type, obj = parts[0], parts[1], parts[2]
         path = path_b.decode("utf-8", errors="surrogateescape")
-        if obj_type == b"blob":
-            # Shape: every path, content-agnostic.
+        rows.append(
+            (
+                mode.decode("ascii"),
+                obj_type.decode("ascii"),
+                obj.decode("ascii"),
+                path,
+            )
+        )
+    return rows
+
+
+def _resolve_symlink_target(link_path: str, target: str) -> "str | None":
+    """Resolve a symlink target relative to link_path; None if outside the tree."""
+    import posixpath
+
+    target = target.strip()
+    if not target or target.startswith("/"):
+        return None
+    base = posixpath.dirname(link_path)
+    resolved = posixpath.normpath(
+        posixpath.join(base, target) if base else target
+    )
+    if resolved.startswith("../") or resolved == "..":
+        return None
+    return resolved
+
+
+def profile_input_symlink_targets() -> "set[str] | None":
+    """In-repo paths that profile-input symlinks at HEAD resolve to.
+
+    None if the tree could not be listed — callers treat that as dirty/miss.
+    """
+    rows = _parse_ls_tree()
+    if rows is None:
+        return None
+    by_path = {path: (mode, typ, obj) for mode, typ, obj, path in rows}
+    targets: set[str] = set()
+    for mode, typ, obj, path in rows:
+        if typ != "blob" or mode != "120000" or not is_profile_input(path):
+            continue
+        target_raw = git("cat-file", "-p", obj)
+        if target_raw is None:
+            return None
+        resolved = _resolve_symlink_target(path, target_raw)
+        if resolved and resolved in by_path and by_path[resolved][1] == "blob":
+            targets.add(resolved)
+    return targets
+
+
+def profile_inputs_affected(changed: list[str]) -> "bool | None":
+    """True if any changed path is a profile input or a profile-input symlink target.
+
+    None if symlink targets could not be resolved (caller treats as miss).
+    """
+    if any(is_profile_input(p) for p in changed):
+        return True
+    targets = profile_input_symlink_targets()
+    if targets is None:
+        return None
+    return any(p in targets for p in changed)
+
+
+def inputs_digest() -> "str | None":
+    """Sha256 covering committed tree shape + profile-input contents at HEAD.
+
+    Layers (committed state only via `git ls-tree`; working-tree dirtiness is a
+    separate HIT gate via `changed_paths`):
+
+    - Every blob **path** (no content) — so adding/removing/renaming a file
+      (e.g. a new `src/db/migrations/` module) changes the digest and busts a
+      cached topology/module_layout, without invalidating on content edits to
+      existing non-input files.
+    - `(path, blob-sha)` for every **profile-input** blob — so manifest/docs/CI
+      content changes still invalidate.
+    - For profile-input **symlinks** (mode 120000), also the resolved in-repo
+      target's blob sha — so `README.md -> docs/README.md` invalidates when the
+      target content changes, not only when the symlink blob (the target path
+      string) changes.
+    - `(path, commit-sha)` for every **gitlink** (`160000 commit` submodule
+      entry) — so adding a submodule or advancing its pointer invalidates.
+
+    None if git could not list the tree.
+    """
+    rows = _parse_ls_tree()
+    if rows is None:
+        return None
+    by_path = {path: (mode, typ, obj) for mode, typ, obj, path in rows}
+
+    pairs: list[str] = []
+    for mode, typ, obj, path in rows:
+        if typ == "blob":
             pairs.append(f"path\0{path}")
             if is_profile_input(path):
-                pairs.append(f"blob\0{path}\0{obj.decode('ascii')}")
-        elif obj_type == b"commit":
-            # Submodule gitlink — path + pinned commit.
-            pairs.append(f"gitlink\0{path}\0{obj.decode('ascii')}")
+                pairs.append(f"blob\0{path}\0{obj}")
+                if mode == "120000":
+                    target_raw = git("cat-file", "-p", obj)
+                    if target_raw is None:
+                        return None
+                    resolved = _resolve_symlink_target(path, target_raw)
+                    if (
+                        resolved
+                        and resolved in by_path
+                        and by_path[resolved][1] == "blob"
+                    ):
+                        pairs.append(
+                            f"symlink-target\0{path}\0{resolved}\0{by_path[resolved][2]}"
+                        )
+        elif typ == "commit":
+            pairs.append(f"gitlink\0{path}\0{obj}")
 
     pairs.sort()
     h = hashlib.sha256()
@@ -378,8 +463,9 @@ def do_get() -> int:
         return miss()
 
     changed = changed_paths()
-    # Could not determine cleanliness, or a profile input changed/was added.
-    if changed is None or any(is_profile_input(p) for p in changed):
+    # Could not determine cleanliness, or a profile input (or symlink target) changed.
+    affected = None if changed is None else profile_inputs_affected(changed)
+    if changed is None or affected is None or affected:
         return miss()
 
     print("HIT")
@@ -419,7 +505,8 @@ def do_put(profile_file: str) -> int:
     # digest and served as a HIT after those edits are reverted — stale. Only
     # persist a profile that matches the committed profile inputs.
     changed = changed_paths()
-    if changed is None or any(is_profile_input(p) for p in changed):
+    affected = None if changed is None else profile_inputs_affected(changed)
+    if changed is None or affected is None or affected:
         sys.stderr.write(
             "repo-profile-cache: profile inputs are dirty; not caching\n"
         )

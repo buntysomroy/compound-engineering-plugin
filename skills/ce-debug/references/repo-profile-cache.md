@@ -29,7 +29,7 @@ Never read from the cache — recompute every run:
 ```
 
 - `<root-sha>` = lexicographically-first `git rev-list --max-parents=0 HEAD` — the repo identity (stable, shared across worktrees and clones).
-- `<inputs-digest>` = sha256 over (1) every committed blob **path** at `HEAD` (tree shape — so a new module/directory invalidates topology), (2) `(path, blob-sha)` for every **profile-input** file (filtered by the helper's `is_profile_input`), and (3) `(path, commit-sha)` for every **gitlink** (submodule) entry. Content edits to existing non-input files keep the same entry; adding/removing any path, changing a profile-input's content, or moving a submodule pointer does not.
+- `<inputs-digest>` = sha256 over (1) every committed blob **path** at `HEAD` (tree shape — so a new module/directory invalidates topology), (2) `(path, blob-sha)` for every **profile-input** file (filtered by the helper's `is_profile_input`), (3) for profile-input **symlinks**, the resolved in-repo target's blob sha, and (4) `(path, commit-sha)` for every **gitlink** (submodule) entry. Content edits to existing non-input files keep the same entry; adding/removing any path, changing a profile-input's content (including through a symlink), or moving a submodule pointer does not.
 
 Two checkouts whose committed path set and profile-input contents match share the same entry, even across different `HEAD` SHAs. Lookup hashes those; on a hit, only this one file is read.
 
@@ -56,7 +56,7 @@ In all three cases, after the agnostic profile is in hand, run **this skill's qu
 
 ## Freshness (delta-aware)
 
-A cached entry is a `HIT` only when its `inputs_digest` matches the current committed profile inputs, its `profile_schema_version` matches, and **no profile-input path** is dirty or newly-added. Freshness is checked with `git status --porcelain --untracked-files=all`, so untracked (`??`) new inputs invalidate too. The profile-input set is a conservative **superset** of every file the schema derives from — dependency manifests + lockfiles (any depth), license, root instruction/doc files, `CONCEPTS.md`/`STRATEGY.md`, topology sources (`Dockerfile`, `.github/workflows/`, `.cursor/rules`). A dirty source file, `docs/plans/*`, or other non-input path does **not** invalidate. Completeness of this set is the cardinal-rule safety requirement: over-invalidating costs a re-derive; under-invalidating would serve a stale profile.
+A cached entry is a `HIT` only when its `inputs_digest` matches the current committed profile inputs, its `profile_schema_version` matches, and **no profile-input path** (nor the resolved in-repo target of a profile-input symlink) is dirty or newly-added. Freshness is checked with `git status --porcelain --untracked-files=all`, so untracked (`??`) new inputs invalidate too. The profile-input set is a conservative **superset** of every file the schema derives from — dependency manifests + lockfiles (any depth), license, root instruction/doc files, `CONCEPTS.md`/`STRATEGY.md`, topology sources (`Dockerfile`, `.github/workflows/`, `.cursor/rules`). A dirty source file, `docs/plans/*`, or other non-input path does **not** invalidate. Completeness of this set is the cardinal-rule safety requirement: over-invalidating costs a re-derive; under-invalidating would serve a stale profile.
 
 ## Degradation
 

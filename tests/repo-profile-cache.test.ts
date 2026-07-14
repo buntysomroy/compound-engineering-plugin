@@ -164,6 +164,34 @@ describe("repo-profile-cache helper", () => {
     expect(run(dir, "get").stdout.startsWith("MISS\n")).toBe(true)
   })
 
+  test("editing symlink target of a profile input → MISS", () => {
+    const dir = makeRepo()
+    mkdirSync(path.join(dir, "docs"))
+    writeFileSync(path.join(dir, "docs", "README.md"), "# docs readme v1\n")
+    spawnSync("rm", ["-f", path.join(dir, "README.md")])
+    spawnSync("ln", ["-s", "docs/README.md", path.join(dir, "README.md")])
+    git(dir, "add", "-A")
+    git(dir, "commit", "-q", "-m", "symlink root README")
+    putProfile(dir)
+    writeFileSync(path.join(dir, "docs", "README.md"), "# docs readme v2\n")
+    git(dir, "add", "-A")
+    git(dir, "commit", "-q", "-m", "edit symlink target only")
+    expect(run(dir, "get").stdout.startsWith("MISS\n")).toBe(true)
+  })
+
+  test("dirty symlink target of a profile input → MISS", () => {
+    const dir = makeRepo()
+    mkdirSync(path.join(dir, "docs"))
+    writeFileSync(path.join(dir, "docs", "README.md"), "# docs readme v1\n")
+    spawnSync("rm", ["-f", path.join(dir, "README.md")])
+    spawnSync("ln", ["-s", "docs/README.md", path.join(dir, "README.md")])
+    git(dir, "add", "-A")
+    git(dir, "commit", "-q", "-m", "symlink root README")
+    putProfile(dir)
+    writeFileSync(path.join(dir, "docs", "README.md"), "# dirty target\n")
+    expect(run(dir, "get").stdout.startsWith("MISS\n")).toBe(true)
+  })
+
   test("input-changing commit at new HEAD → MISS (new inputs digest)", () => {
     const dir = makeRepo()
     putProfile(dir)

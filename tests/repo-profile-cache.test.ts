@@ -164,6 +164,35 @@ describe("repo-profile-cache helper", () => {
     expect(run(dir, "get").stdout.startsWith("MISS\n")).toBe(true)
   })
 
+  test("dirty uncommitted submodule pointer advance → MISS", () => {
+    const dir = makeRepo()
+    const shaA = git(dir, "rev-parse", "HEAD").trim()
+    writeFileSync(
+      path.join(dir, ".gitmodules"),
+      '[submodule "vendor/x"]\n\tpath = vendor/x\n\turl = https://example.com/x.git\n',
+    )
+    git(dir, "add", ".gitmodules")
+    expect(
+      spawnSync(
+        "git",
+        ["update-index", "--add", "--cacheinfo", `160000,${shaA},vendor/x`],
+        { cwd: dir, encoding: "utf8" },
+      ).status,
+    ).toBe(0)
+    git(dir, "commit", "-q", "-m", "add submodule gitlink")
+    putProfile(dir)
+    const shaB = git(dir, "rev-parse", "HEAD").trim()
+    expect(
+      spawnSync(
+        "git",
+        ["update-index", "--cacheinfo", `160000,${shaB},vendor/x`],
+        { cwd: dir, encoding: "utf8" },
+      ).status,
+    ).toBe(0)
+    // Staged but uncommitted gitlink advance — must not HIT.
+    expect(run(dir, "get").stdout.startsWith("MISS\n")).toBe(true)
+  })
+
   test("editing symlink target of a profile input → MISS", () => {
     const dir = makeRepo()
     mkdirSync(path.join(dir, "docs"))

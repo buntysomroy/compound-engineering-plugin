@@ -316,17 +316,34 @@ def profile_input_symlink_targets() -> "set[str] | None":
     return targets
 
 
-def profile_inputs_affected(changed: list[str]) -> "bool | None":
-    """True if any changed path is a profile input or a profile-input symlink target.
+def head_gitlink_paths() -> "set[str] | None":
+    """Paths of submodule gitlinks at HEAD. None if the tree could not be listed."""
+    rows = _parse_ls_tree()
+    if rows is None:
+        return None
+    return {path for _mode, typ, _obj, path in rows if typ == "commit"}
 
-    None if symlink targets could not be resolved (caller treats as miss).
+
+def profile_inputs_affected(changed: list[str]) -> "bool | None":
+    """True if any changed path affects the cached profile's freshness.
+
+    Covers ordinary profile inputs, profile-input symlink-chain paths, and
+    HEAD gitlink (submodule) paths — so an uncommitted submodule pointer
+    advance cannot serve a HIT keyed on the old committed gitlink.
+
+    None if symlink/gitlink metadata could not be resolved (caller treats as miss).
     """
     if any(is_profile_input(p) for p in changed):
         return True
     targets = profile_input_symlink_targets()
     if targets is None:
         return None
-    return any(p in targets for p in changed)
+    if any(p in targets for p in changed):
+        return True
+    gitlinks = head_gitlink_paths()
+    if gitlinks is None:
+        return None
+    return any(p in gitlinks for p in changed)
 
 
 def inputs_digest() -> "str | None":
